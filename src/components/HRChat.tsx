@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { RefreshCw, MessageCircle, ArrowLeft } from "lucide-react";
 import { UserProfile, Message, MessageType } from "@/types/profile";
 import ChatProgressBar from "./ChatProgressBar";
+import { API_CONFIG } from "../config/api";
 
 const HRChat = ({ onExit }: { onExit: () => void }) => {
   const [messages, setMessages] = useState<Message[]>([
@@ -145,7 +146,7 @@ ${conversationHistory}
     try {
       const prompt = generateHRPrompt(userResponse, conversationHistory);
 
-      const response = await fetch('/api/openai', {
+      const response = await fetch(API_CONFIG.openaiURL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

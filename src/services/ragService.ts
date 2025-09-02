@@ -1,3 +1,5 @@
+import { API_CONFIG } from '../config/api';
+
 interface KnowledgeItem {
   id: string;
   question: string;
@@ -304,7 +306,7 @@ ${this.currentProfile.evaluations.map(evaluation =>
 
   // Вызов OpenAI API
   private async callOpenAI(messages: ChatMessage[], model: string = 'gpt-4o-mini'): Promise<string> {
-    const response = await fetch('/api/openai', {
+    const response = await fetch(API_CONFIG.openaiURL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
