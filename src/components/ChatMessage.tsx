@@ -1,5 +1,6 @@
 import { Message } from "@/types/profile";
-import { Mic } from "lucide-react";
+import { Mic, FileText } from "lucide-react";
+import VoiceMessagePlayer from "./VoiceMessagePlayer";
 
 interface ChatMessageProps {
   message: Message;
@@ -8,6 +9,7 @@ interface ChatMessageProps {
 const ChatMessage = ({ message }: ChatMessageProps) => {
   const isUser = message.isUser;
   const isVoiceMessage = message.type === 'voice';
+  const isFileMessage = message.type === 'file';
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -23,21 +25,94 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
           </div>
 
           {/* Сообщение */}
-          <div className={`rounded-2xl px-4 py-3 shadow-sm relative ${
+          <div className={`rounded-2xl shadow-sm relative ${
             isUser
               ? 'bg-blue-600 text-white'
               : 'bg-white text-gray-900 border border-gray-200'
           }`}>
-            {/* Индикатор голосового сообщения */}
+            {/* Голосовое сообщение */}
             {isVoiceMessage && (
-              <div className={`flex items-center gap-2 mb-2 ${
-                isUser ? 'text-blue-100' : 'text-gray-500'
-              }`}>
-                <Mic className="h-4 w-4" />
-                <span className="text-xs">Голосовое сообщение</span>
+              <div className="p-3">
+                {/* Индикатор голосового сообщения */}
+                <div className={`flex items-center gap-2 mb-3 ${
+                  isUser ? 'text-blue-100' : 'text-gray-500'
+                }`}>
+                  <Mic className="h-4 w-4" />
+                  <span className="text-xs font-medium">
+                    Голосовое сообщение
+                    {message.confidence && (
+                      <span className="ml-2 opacity-75">
+                        ({Math.round(message.confidence * 100)}% уверенности)
+                      </span>
+                    )}
+                  </span>
+                </div>
+
+                {/* Плеер для голосового сообщения */}
+                <VoiceMessagePlayer
+                  audioUrl={message.audioUrl}
+                  className="mb-2"
+                  onPlaybackStart={() => console.log('Voice playback started')}
+                  onPlaybackEnd={() => console.log('Voice playback ended')}
+                />
+
+                {/* Транскрипт текста, если он есть */}
+                {message.text && message.text.trim() && (
+                  <div className={`mt-3 pt-3 border-t ${
+                    isUser ? 'border-blue-500/30' : 'border-gray-200'
+                  }`}>
+                    <div className={`text-xs mb-1 ${
+                      isUser ? 'text-blue-200' : 'text-gray-500'
+                    }`}>
+                      Распознанный текст:
+                    </div>
+                    <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
+                      isUser ? 'text-blue-50' : 'text-gray-700'
+                    }`}>
+                      {message.text}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
+
+            {/* Файловое сообщение */}
+            {isFileMessage && (
+              <div className="p-4">
+                <div className={`flex items-center gap-2 mb-2 ${
+                  isUser ? 'text-blue-100' : 'text-gray-500'
+                }`}>
+                  <FileText className="h-4 w-4" />
+                  <span className="text-xs font-medium">Файл</span>
+                </div>
+                {message.fileUrl && (
+                  <a
+                    href={message.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`text-sm underline ${
+                      isUser ? 'text-blue-200 hover:text-blue-100' : 'text-blue-600 hover:text-blue-800'
+                    }`}
+                  >
+                    Скачать файл
+                  </a>
+                )}
+                {message.text && (
+                  <p className={`text-sm leading-relaxed whitespace-pre-wrap mt-2 ${
+                    isUser ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    {message.text}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Текстовое сообщение */}
+            {!isVoiceMessage && !isFileMessage && (
+              <div className="px-4 py-3">
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
+              </div>
+            )}
           </div>
         </div>
 

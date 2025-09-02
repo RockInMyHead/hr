@@ -292,6 +292,131 @@ ${conversationHistory}
     }
   };
 
+  // Функция для обновления оценок компетенций на основе анализа
+  const updateCompetencyRatings = (analysis: string, userResponse: string) => {
+    try {
+      // Получаем текущие оценки компетенций
+      const currentRatings = JSON.parse(localStorage.getItem(`competency-data-${user.email}`) || '[]');
+
+      // Анализируем ответ пользователя и обновляем оценки
+      const updatedRatings = analyzeAndUpdateRatings(analysis, userResponse, currentRatings);
+
+      // Сохраняем обновленные оценки
+      localStorage.setItem(`competency-data-${user.email}`, JSON.stringify(updatedRatings));
+
+      console.log('Оценки компетенций обновлены:', updatedRatings);
+    } catch (error) {
+      console.error('Ошибка при обновлении оценок компетенций:', error);
+    }
+  };
+
+  // Функция анализа ответа и обновления оценок компетенций
+  const analyzeAndUpdateRatings = (analysis: string, userResponse: string, currentRatings: any[]) => {
+    const ratings = [...currentRatings];
+
+    // Анализируем ключевые слова и фразы в ответе пользователя
+    const response = userResponse.toLowerCase();
+    const analysisText = analysis.toLowerCase();
+
+    // Анализ негативного поведения - снижение оценок
+    const rudeWords = ['дурак', 'идиот', 'тупой', 'козел', 'сука', 'блядь', 'пизд', 'хуй', 'ебан'];
+    const negativePhrases = ['отстань', 'валите', 'пошел', 'убирайся', 'заткнись'];
+    const dismissiveWords = ['ничего', 'нет', 'не знаю', 'не помню', 'не хочу', 'не буду'];
+
+    // Проверка на грубость - снижение всех оценок
+    const hasRudeWords = rudeWords.some(word => response.includes(word));
+    const hasNegativePhrases = negativePhrases.some(phrase => response.includes(phrase));
+    const isDismissive = dismissiveWords.some(word => response.includes(word)) && response.split(' ').length <= 3;
+
+    if (hasRudeWords || hasNegativePhrases) {
+      // Снижение оценок при грубости
+      updateRating(ratings, 'communication', -0.3);
+      updateRating(ratings, 'leadership', -0.3);
+      updateRating(ratings, 'reliability', -0.3);
+      return ratings; // Прекращаем анализ при грубости
+    }
+
+    if (isDismissive) {
+      // Снижение оценок при немотивированности
+      updateRating(ratings, 'communication', -0.1);
+      updateRating(ratings, 'initiative', -0.1);
+      return ratings; // Прекращаем анализ при односложных ответах
+    }
+
+    // Положительные обновления только при нормальном поведении
+
+    // Коммуникация
+    if (response.includes('общ') || response.includes('коммуник') || response.includes('презент') ||
+        response.includes('переговор') || analysisText.includes('коммуник')) {
+      updateRating(ratings, 'communication', 0.1);
+    }
+
+    // Лидерство
+    if (response.includes('руковод') || response.includes('команд') || response.includes('веду') ||
+        response.includes('мотивир') || response.includes('принима') || analysisText.includes('лидер')) {
+      updateRating(ratings, 'leadership', 0.1);
+    }
+
+    // Продуктивность
+    if (response.includes('продуктив') || response.includes('эффектив') || response.includes('результат') ||
+        response.includes('достижен') || response.includes('выполн') || analysisText.includes('продуктив')) {
+      updateRating(ratings, 'productivity', 0.1);
+    }
+
+    // Надежность
+    if (response.includes('надеж') || response.includes('ответствен') || response.includes('срок') ||
+        response.includes('обязатель') || response.includes('качеств') || analysisText.includes('надеж')) {
+      updateRating(ratings, 'reliability', 0.1);
+    }
+
+    // Инициативность
+    if (response.includes('инициатив') || response.includes('предлага') || response.includes('улучшен') ||
+        response.includes('решен') || response.includes('проблем') || analysisText.includes('инициатив')) {
+      updateRating(ratings, 'initiative', 0.1);
+    }
+
+    return ratings;
+  };
+
+  // Вспомогательная функция для обновления оценки компетенции
+  const updateRating = (ratings: any[], competencyId: string, increment: number) => {
+    const ratingIndex = ratings.findIndex(r => r.competencyId === competencyId);
+
+    if (ratingIndex >= 0) {
+      // Обновляем существующую оценку
+      const currentValue = ratings[ratingIndex].currentValue;
+      const newValue = Math.min(5, Math.max(0, currentValue + increment));
+      ratings[ratingIndex].currentValue = newValue;
+      ratings[ratingIndex].lastAssessed = new Date().toISOString();
+
+      // Обновляем целевое значение на основе текущего
+      ratings[ratingIndex].targetValue = Math.min(5, newValue + 1);
+    } else {
+      // Создаем новую оценку
+      const startValue = Math.max(1, Math.min(5, 3.0 + increment)); // Начинаем с 3.0 + прирост, ограничиваем диапазоном
+      ratings.push({
+        competencyId,
+        currentValue: startValue,
+        targetValue: Math.min(5, startValue + 1),
+        category: getCompetencyCategory(competencyId),
+        lastAssessed: new Date().toISOString(),
+        improvementPlan: []
+      });
+    }
+  };
+
+  // Вспомогательная функция для определения категории компетенции
+  const getCompetencyCategory = (competencyId: string): string => {
+    const categories: Record<string, string> = {
+      communication: 'soft',
+      leadership: 'leadership',
+      productivity: 'business',
+      reliability: 'soft',
+      initiative: 'soft'
+    };
+    return categories[competencyId] || 'soft';
+  };
+
   const extractPersonalInfo = (content: string, profile: UserProfile) => {
     // Имя
     const nameMatch = content.match(/(?:имя|зовут|меня зовут)[:\s]*([А-Яа-я\s]+)/i);
@@ -424,7 +549,7 @@ ${conversationHistory}
     }
   };
 
-  const handleSendMessage = async (messageText: string, messageType: MessageType = 'text') => {
+  const handleSendMessage = async (messageText: string, messageType: MessageType = 'text', voiceData?: any) => {
     // Добавляем сообщение пользователя
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -432,6 +557,13 @@ ${conversationHistory}
       isUser: true,
       timestamp: new Date(),
       type: messageType,
+      confidence: voiceData?.confidence,
+      audioUrl: voiceData?.audioUrl,
+      metadata: voiceData ? {
+        audioBlob: voiceData.audioBlob,
+        duration: voiceData.duration,
+        ...voiceData
+      } : undefined,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -450,6 +582,9 @@ ${conversationHistory}
 
       // Обновляем профиль пользователя
       updateUserProfile(analysis);
+
+      // Обновляем оценки компетенций на основе анализа
+      updateCompetencyRatings(analysis, messageText);
 
       // Добавляем ответ HR
       const hrResponse: Message = {

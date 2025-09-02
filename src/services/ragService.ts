@@ -108,7 +108,7 @@ class RAGService {
     return score;
   }
 
-  // ChatGPT Интервьюер - человечное общение на основе базы знаний
+  // ИИ Интервьюер - человечное общение на основе базы знаний
   async conductInterview(userMessage: string, difficulty: string = 'middle'): Promise<string> {
     try {
       // Добавляем сообщение пользователя в историю
@@ -133,6 +133,7 @@ class RAGService {
 3. Поддерживать беседу, реагировать на ответы кандидата
 4. Переходить к следующим вопросам логично
 5. Быть эмпатичным и понимающим
+6. ОЦЕНИВАТЬ ПОВЕДЕНИЕ И ЭМОЦИОНАЛЬНЫЙ ТОН кандидата
 
 База знаний с вопросами:
 ${knowledgeContext}
@@ -145,8 +146,17 @@ ${knowledgeContext}
 - Поддерживай позитивную атмосферу
 - Не показывай правильные ответы напрямую
 
+ВАЖНО: Анализируй поведение кандидата и его эмоциональный тон!
+- Если кандидат грубый, агрессивный или использует нецензурную лексику - отметь это
+- Если кандидат немотивирован, дает односложные ответы - отметь это
+- Если кандидат демонстрирует негативное отношение - отметь это
+- Передай эту информацию в финальном анализе профиля
+
 История беседы:
-${this.conversationHistory.slice(-5).map(msg => `${msg.role}: ${msg.content}`).join('\n')}`;
+${this.conversationHistory.slice(-5).map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+
+Поведенческий анализ последнего ответа:
+${this.analyzeUserBehavior(userMessage)}`;
 
       const response = await this.callOpenAI([
         { role: 'system', content: systemPrompt },
@@ -167,7 +177,133 @@ ${this.conversationHistory.slice(-5).map(msg => `${msg.role}: ${msg.content}`).j
     }
   }
 
-  // ChatGPT Оценщик - анализ ответов и создание профиля
+  // Анализ поведения пользователя
+  private analyzeUserBehavior(message: string): string {
+    const lowerMessage = message.toLowerCase().trim();
+
+    // Анализ на грубость и негатив
+    const rudeWords = ['дурак', 'идиот', 'тупой', 'козел', 'сука', 'блядь', 'пизд', 'хуй', 'ебан', 'охуе', 'отъебись'];
+    const negativePhrases = ['отстань', 'валите', 'пошел', 'убирайся', 'заткнись', 'молчать', 'заткни'];
+    const dismissiveWords = ['ничего', 'нет', 'не знаю', 'не помню', 'не хочу', 'не буду'];
+
+    let behaviorAnalysis = [];
+
+    // Проверка на грубость
+    const hasRudeWords = rudeWords.some(word => lowerMessage.includes(word));
+    if (hasRudeWords) {
+      behaviorAnalysis.push('ГРУБОСТЬ: Использованы оскорбительные выражения');
+    }
+
+    // Проверка на негатив
+    const hasNegativePhrases = negativePhrases.some(phrase => lowerMessage.includes(phrase));
+    if (hasNegativePhrases) {
+      behaviorAnalysis.push('НЕГАТИВ: Агрессивное или отталкивающее поведение');
+    }
+
+    // Проверка на односложные ответы
+    if (lowerMessage.split(' ').length <= 3 && dismissiveWords.some(word => lowerMessage.includes(word))) {
+      behaviorAnalysis.push('НЕМОТИВИРОВАННОСТЬ: Односложные или уклончивые ответы');
+    }
+
+    // Проверка на длину ответа
+    if (lowerMessage.length < 10) {
+      behaviorAnalysis.push('КРАТКОСТЬ: Очень короткий ответ, недостаточно информации');
+    }
+
+    // Анализ эмоционального тона
+    if (lowerMessage.includes('!') && hasRudeWords) {
+      behaviorAnalysis.push('АГРЕССИЯ: Повышенная эмоциональность с негативным подтекстом');
+    }
+
+    if (behaviorAnalysis.length === 0) {
+      behaviorAnalysis.push('НОРМАЛЬНО: Ответ соответствует ожиданиям');
+    }
+
+    return behaviorAnalysis.join('; ');
+  }
+
+  // Анализ поведения за всю беседу
+  private analyzeConversationBehavior(): string {
+    const userMessages = this.conversationHistory.filter(msg => msg.role === 'user');
+    const totalMessages = userMessages.length;
+
+    if (totalMessages === 0) return 'Недостаточно данных для анализа поведения';
+
+    let rudeCount = 0;
+    let negativeCount = 0;
+    let dismissiveCount = 0;
+    let shortAnswersCount = 0;
+    let totalWords = 0;
+
+    const rudeWords = ['дурак', 'идиот', 'тупой', 'козел', 'сука', 'блядь', 'пизд', 'хуй', 'ебан', 'охуе'];
+    const negativePhrases = ['отстань', 'валите', 'пошел', 'убирайся', 'заткнись', 'молчать'];
+    const dismissiveWords = ['ничего', 'нет', 'не знаю', 'не помню', 'не хочу', 'не буду'];
+
+    userMessages.forEach(msg => {
+      const text = msg.content.toLowerCase();
+      totalWords += text.split(' ').length;
+
+      // Проверка на грубость
+      if (rudeWords.some(word => text.includes(word))) {
+        rudeCount++;
+      }
+
+      // Проверка на негатив
+      if (negativePhrases.some(phrase => text.includes(phrase))) {
+        negativeCount++;
+      }
+
+      // Проверка на односложные ответы
+      if (text.split(' ').length <= 3 && dismissiveWords.some(word => text.includes(word))) {
+        dismissiveCount++;
+      }
+
+      // Проверка на короткие ответы
+      if (text.length < 10) {
+        shortAnswersCount++;
+      }
+    });
+
+    const avgWordsPerMessage = totalWords / totalMessages;
+    const rudePercentage = (rudeCount / totalMessages) * 100;
+    const negativePercentage = (negativeCount / totalMessages) * 100;
+    const dismissivePercentage = (dismissiveCount / totalMessages) * 100;
+    const shortAnswersPercentage = (shortAnswersCount / totalMessages) * 100;
+
+    let analysis = [];
+
+    if (rudePercentage > 20) {
+      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${rudePercentage.toFixed(0)}% сообщений содержат грубость или оскорбления`);
+    } else if (rudeCount > 0) {
+      analysis.push(`ПРОБЛЕМА: ${rudeCount} сообщение(й) содержат грубость`);
+    }
+
+    if (negativePercentage > 30) {
+      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${negativePercentage.toFixed(0)}% сообщений носят негативный или агрессивный характер`);
+    } else if (negativeCount > 0) {
+      analysis.push(`ПРОБЛЕМА: ${negativeCount} негативное(ых) сообщение(й)`);
+    }
+
+    if (dismissivePercentage > 40) {
+      analysis.push(`ПРОБЛЕМА: ${dismissivePercentage.toFixed(0)}% ответов односложные или уклончивые`);
+    }
+
+    if (avgWordsPerMessage < 5) {
+      analysis.push(`ПРОБЛЕМА: Средняя длина ответа ${avgWordsPerMessage.toFixed(1)} слов - недостаточно информации`);
+    }
+
+    if (shortAnswersPercentage > 50) {
+      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${shortAnswersPercentage.toFixed(0)}% ответов очень короткие`);
+    }
+
+    if (analysis.length === 0) {
+      analysis.push('ПОВЕДЕНИЕ: Кандидат проявил нормальную коммуникацию и готовность к диалогу');
+    }
+
+    return analysis.join('; ');
+  }
+
+  // ИИ Оценщик - анализ ответов и создание профиля
   async evaluateResponse(question: string, userAnswer: string, expectedAnswer: string, category: string): Promise<EvaluationResult> {
     try {
       const evaluationPrompt = `Ты - эксперт по оценке кандидатов на техническом собеседовании. 
@@ -270,7 +406,11 @@ ${this.conversationHistory.slice(-5).map(msg => `${msg.role}: ${msg.content}`).j
   // Генерация итогового профиля кандидата
   async generateFinalProfile(): Promise<CandidateProfile> {
     try {
+      // Анализ поведения из истории беседы
+      const behaviorAnalysis = this.analyzeConversationBehavior();
+
       const profilePrompt = `На основе результатов собеседования создай развернутый профиль кандидата.
+УЧТИ ПОВЕДЕНЧЕСКИЙ АНАЛИЗ: ${behaviorAnalysis}
 
 ДАННЫЕ СОБЕСЕДОВАНИЯ:
 - Общий балл: ${this.currentProfile.overallScore}/100
@@ -278,16 +418,25 @@ ${this.conversationHistory.slice(-5).map(msg => `${msg.role}: ${msg.content}`).j
 - Софт скиллы: ${JSON.stringify(this.currentProfile.softSkills)}
 - Количество вопросов: ${this.currentProfile.evaluations.length}
 
+ИСТОРИЯ ОБЩЕНИЯ:
+${this.conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+
 ДЕТАЛЬНЫЕ ОЦЕНКИ:
 ${this.currentProfile.evaluations.map(evaluation =>
   `Категория: ${evaluation.category}, Балл: ${evaluation.score}, Сильные стороны: ${evaluation.strengths.join(', ')}, Слабые стороны: ${evaluation.weaknesses.join(', ')}`
 ).join('\n')}
 
-Создай краткое резюме кандидата (2-3 предложения), указав:
-1. Общее впечатление от уровня подготовки
-2. Ключевые сильные стороны
-3. Основные области для развития
-4. Рекомендации по найму (подходит/не подходит для позиции)`;
+ВАЖНО: Проанализируй поведение кандидата в ходе беседы!
+- Если кандидат был грубым, агрессивным или использовал нецензурную лексику - это серьезный минус
+- Если кандидат давал односложные ответы типа "нет", "ничего" - это признак немотивированности
+- Если кандидат отказывался общаться или проявлял негатив - это серьезная проблема
+- Учти эмоциональный тон и готовность к коммуникации
+
+Создай честный анализ кандидата, указав:
+1. Общее впечатление от уровня подготовки И ПОВЕДЕНИЯ
+2. Ключевые сильные стороны (если есть)
+3. Основные проблемы и области для развития
+4. ЧЕСТНАЯ рекомендация по найму с учетом поведения`;
 
       const summary = await this.callOpenAI([
         { role: 'system', content: profilePrompt }

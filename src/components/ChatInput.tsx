@@ -1,12 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, MicOff, Send, Square } from "lucide-react";
+import { Mic, MicOff, Send, Square, Play, Pause } from "lucide-react";
 import { useVoiceRecording } from "@/hooks/use-voice-recording";
 import { MessageType } from "@/types/profile";
 
+interface VoiceMessageData {
+  text: string;
+  audioBlob?: Blob;
+  confidence?: number;
+  duration?: number;
+}
+
 interface ChatInputProps {
-  onSendMessage: (message: string, type?: MessageType) => void;
+  onSendMessage: (message: string, type?: MessageType, voiceData?: VoiceMessageData) => void;
   isLoading: boolean;
 }
 
@@ -23,6 +30,9 @@ const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
     startRecording,
     stopRecording,
     clearTranscript,
+    audioBlob,
+    confidence,
+    recordingDuration,
   } = useVoiceRecording();
 
   // Синхронизируем транскрипт с текстовым полем
@@ -32,12 +42,26 @@ const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
     }
   }, [transcript]);
 
-  // Отправка текстового сообщения
-  const handleSendTextMessage = () => {
+  // Отправка сообщения (текстового или голосового)
+  const handleSendMessage = () => {
     if (textMessage.trim() && !isLoading) {
-      onSendMessage(textMessage.trim(), 'text');
+      // Если есть transcript и audioBlob, отправляем голосовое сообщение
+      if (transcript && audioBlob) {
+        const voiceData: VoiceMessageData = {
+          text: textMessage.trim(),
+          audioBlob: audioBlob,
+          confidence: confidence || undefined,
+          duration: recordingDuration || undefined,
+        };
+        onSendMessage(textMessage.trim(), 'voice', voiceData);
+      } else {
+        // Иначе отправляем текстовое сообщение
+        onSendMessage(textMessage.trim(), 'text');
+      }
+
       setTextMessage("");
       clearTranscript();
+
       // Сбрасываем высоту textarea
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -49,7 +73,7 @@ const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendTextMessage();
+      handleSendMessage();
     }
   };
 
@@ -76,14 +100,7 @@ const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
     }
   };
 
-  // Отправка голосового сообщения
-  const handleSendVoiceMessage = () => {
-    if (transcript.trim() && !isLoading) {
-      onSendMessage(transcript.trim(), 'voice');
-      setTextMessage("");
-      clearTranscript();
-    }
-  };
+
 
   return (
     <div className="space-y-3">
@@ -103,33 +120,52 @@ const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
         <div className="absolute right-2 bottom-2 flex gap-2">
           {/* Кнопка голосового ввода */}
           {isSupported && (
-            <Button
-              onClick={handleVoiceToggle}
-              size="sm"
-              variant={isRecording ? "destructive" : "ghost"}
-              className={`h-8 w-8 p-0 ${
-                isRecording
-                  ? "bg-red-600 hover:bg-red-700 animate-pulse"
-                  : "bg-gray-700 hover:bg-gray-600"
-              }`}
-              disabled={isLoading || isProcessing}
-              title={isRecording ? "Остановить запись" : "Начать голосовой ввод"}
-            >
-              {isRecording ? (
-                <Square className="h-4 w-4" />
-              ) : (
-                <Mic className="h-4 w-4" />
-              )}
-            </Button>
+            <div className="relative">
+              <Button
+                onClick={handleVoiceToggle}
+                size="sm"
+                variant={isRecording ? "destructive" : "ghost"}
+                className={`h-8 w-8 p-0 ${
+                  isRecording
+                    ? "bg-red-600 hover:bg-red-700 animate-pulse"
+                    : transcript && audioBlob
+                      ? "bg-green-600 hover:bg-green-700"
+                      : "bg-gray-700 hover:bg-gray-600"
+                }`}
+                disabled={isLoading || isProcessing}
+                title={
+                  isRecording
+                    ? "Остановить запись"
+                    : transcript && audioBlob
+                      ? "Голосовое сообщение готово к отправке"
+                      : "Начать голосовой ввод"
+                }
+              >
+                {isRecording ? (
+                  <Square className="h-4 w-4" />
+                ) : transcript && audioBlob ? (
+                  <div className="relative">
+                    <Mic className="h-4 w-4" />
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-400 rounded-full"></div>
+                  </div>
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
           )}
 
           {/* Кнопка отправки */}
           <Button
-            onClick={handleSendTextMessage}
+            onClick={handleSendMessage}
             size="sm"
-            className="h-8 w-8 p-0 bg-blue-600 hover:bg-blue-700"
+            className={`h-8 w-8 p-0 ${
+              transcript && audioBlob
+                ? "bg-green-600 hover:bg-green-700"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
             disabled={!textMessage.trim() || isLoading}
-            title="Отправить сообщение"
+            title={transcript && audioBlob ? "Отправить голосовое сообщение" : "Отправить сообщение"}
           >
             <Send className="h-4 w-4" />
           </Button>
@@ -171,22 +207,7 @@ const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
         </div>
       )}
 
-      {/* Кнопка отправки голосового сообщения */}
-      {transcript && !isRecording && (
-        <div className="flex items-center gap-2">
-          <div className="flex-1 text-green-400 text-sm">
-            Распознано: "{transcript}"
-          </div>
-          <Button
-            onClick={handleSendVoiceMessage}
-            size="sm"
-            className="bg-green-600 hover:bg-green-700"
-            disabled={isLoading}
-          >
-            Отправить голосовое сообщение
-          </Button>
-        </div>
-      )}
+
     </div>
   );
 };
