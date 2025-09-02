@@ -6,8 +6,14 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import RAGInterviewPage from "./pages/RAGInterviewPage";
+import { cleanupLocalStorage } from "./lib/session";
 
 const queryClient = new QueryClient();
+
+// Clean up potentially problematic localStorage data on app start
+if (typeof window !== 'undefined') {
+  cleanupLocalStorage();
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

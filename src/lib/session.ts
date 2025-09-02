@@ -40,7 +40,10 @@ export function readSessions(): StoredSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.sessions);
     const parsed = raw ? JSON.parse(raw) : [];
-    return parsed.map((s: Record<string, unknown>) => ({ ...s, userId: (s.userId as string) ?? 'anonymous' }));
+    // Filter out potentially corrupted sessions
+    return parsed
+      .filter((s: Record<string, unknown>) => s && typeof s === 'object' && s.id)
+      .map((s: Record<string, unknown>) => ({ ...s, userId: (s.userId as string) ?? 'anonymous' }));
   } catch (error) {
     console.warn('Failed to read sessions from localStorage:', error);
     return [];
@@ -100,10 +103,27 @@ export function formatMinutes(mins: number): string {
 export function readUsers(): Record<string, unknown>[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.users);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    // Filter out potentially corrupted user data
+    return Array.isArray(parsed) ? parsed.filter(u => u && typeof u === 'object') : [];
   } catch (error) {
     console.warn('Failed to read users from localStorage:', error);
     return [];
+  }
+}
+
+// Function to clean up potentially problematic localStorage data
+export function cleanupLocalStorage(): void {
+  try {
+    const keys = Object.keys(localStorage);
+    for (const key of keys) {
+      if (key.includes('vite') || key.includes('chunk') || key.includes('module')) {
+        localStorage.removeItem(key);
+      }
+    }
+    console.log('Cleaned up localStorage');
+  } catch (error) {
+    console.warn('Failed to cleanup localStorage:', error);
   }
 }
 
