@@ -28,7 +28,7 @@ export function readSessions(): StoredSession[] {
     }
     const userId = currentUser?.id ?? 'anonymous';
     const xhr = new XMLHttpRequest();
-    xhr.open('GET', `/api/sessions?userId=${encodeURIComponent(userId)}`, false);
+    xhr.open('GET', `/api/chat-sessions?userId=${encodeURIComponent(userId)}`, false);
     xhr.send(null);
     if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText) {
       const serverSessions = JSON.parse(xhr.responseText);
@@ -70,7 +70,7 @@ export function appendSession(session: Omit<StoredSession, 'userId' | 'companyId
 
   // Best-effort send to server (non-blocking)
   try {
-    fetch('/api/sessions/upsert', {
+    fetch('/api/chat-sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(withUser),
