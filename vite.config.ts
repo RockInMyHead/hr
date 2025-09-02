@@ -6,13 +6,6 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  define: {
-    // React Router future flags to suppress warnings
-    __REACT_ROUTER_FUTURE_FLAGS: JSON.stringify({
-      v7_startTransition: true,
-      v7_relativeSplatPath: true,
-    }),
-  },
   base: mode === 'production' ? './' : '/',
   server: {
     host: "localhost",
