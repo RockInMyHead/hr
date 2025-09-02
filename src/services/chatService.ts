@@ -36,11 +36,11 @@ export class ChatService {
       startTime: Date.now(),
       status: 'active' as const,
       sessionType: data.sessionType,
-      metadata: data.metadata ? JSON.stringify(data.metadata) : undefined
+      metadata: data.metadata
     };
 
-    this.activeSession = chatDatabase.createChatSession(sessionData);
-    
+    this.activeSession = await chatDatabase.createChatSession(sessionData);
+
     // Добавляем системное сообщение о начале сессии
     await this.addSystemMessage(
       this.activeSession.id,
@@ -57,7 +57,7 @@ export class ChatService {
 
   // Загрузка существующей сессии
   async loadSession(sessionId: string): Promise<ChatSession | null> {
-    const session = chatDatabase.getChatSession(sessionId);
+    const session = await chatDatabase.getChatSession(sessionId);
     if (session) {
       this.activeSession = session;
     }
@@ -69,7 +69,7 @@ export class ChatService {
     const targetSessionId = sessionId || this.activeSession?.id;
     if (!targetSessionId) return;
 
-    chatDatabase.updateChatSession(targetSessionId, {
+    await chatDatabase.updateChatSession(targetSessionId, {
       endTime: Date.now(),
       status: 'completed'
     });
@@ -88,10 +88,10 @@ export class ChatService {
       timestamp: Date.now(),
       messageType: messageData.messageType || 'text',
       confidence: messageData.confidence,
-      metadata: messageData.metadata ? JSON.stringify(messageData.metadata) : undefined
+      metadata: messageData.metadata
     };
 
-    return chatDatabase.addChatMessage(message);
+    return await chatDatabase.addChatMessage(message);
   }
 
   // Добавление системного сообщения
@@ -105,47 +105,48 @@ export class ChatService {
 
   // Получение всех сообщений сессии
   async getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-    return chatDatabase.getChatMessages(sessionId);
+    return await chatDatabase.getChatMessages(sessionId);
   }
 
   // Получение последних сообщений сессии
   async getRecentMessages(sessionId: string, limit = 20): Promise<ChatMessage[]> {
-    return chatDatabase.getRecentChatMessages(sessionId, limit);
+    return await chatDatabase.getRecentChatMessages(sessionId, limit);
   }
 
   // Получение истории чатов пользователя
   async getUserChatHistory(userId: string, limit = 10): Promise<ChatHistory[]> {
-    const sessions = chatDatabase.getUserChatSessions(userId, limit);
-    
+    const sessions = await chatDatabase.getUserChatSessions(userId, limit);
+
     const history: ChatHistory[] = [];
-    
+
     for (const session of sessions) {
-      const messages = chatDatabase.getChatMessages(session.id);
-      const profile = chatDatabase.getCandidateProfile(session.id);
-      
+      const messages = await chatDatabase.getChatMessages(session.id);
+      const profile = await chatDatabase.getCandidateProfile(session.id);
+
       history.push({
         session,
         messages,
         profile: profile || undefined
       });
     }
-    
+
     return history;
   }
 
   // Сохранение профиля кандидата
   async saveCandidateProfile(sessionId: string, profileData: Partial<CandidateProfile>): Promise<CandidateProfile> {
-    const session = chatDatabase.getChatSession(sessionId);
+    const session = await chatDatabase.getChatSession(sessionId);
     if (!session) {
       throw new Error('Session not found');
     }
 
-    const existingProfile = chatDatabase.getCandidateProfile(sessionId);
-    
+    const existingProfile = await chatDatabase.getCandidateProfile(sessionId);
+
     if (existingProfile) {
       // Обновляем существующий профиль
-      chatDatabase.updateCandidateProfile(existingProfile.id, profileData);
-      return chatDatabase.getCandidateProfile(sessionId)!;
+      await chatDatabase.updateCandidateProfile(existingProfile.id, profileData);
+      const updatedProfile = await chatDatabase.getCandidateProfile(sessionId);
+      return updatedProfile!;
     } else {
       // Создаем новый профиль
       const newProfileData = {
@@ -156,50 +157,50 @@ export class ChatService {
         position: profileData.position || '',
         department: profileData.department || '',
         overallScore: profileData.overallScore || 0,
-        technicalSkills: profileData.technicalSkills || '{}',
-        softSkills: profileData.softSkills || '{}',
+        technicalSkills: profileData.technicalSkills || {},
+        softSkills: profileData.softSkills || {},
         summary: profileData.summary || '',
-        recommendations: profileData.recommendations || '[]',
-        strengths: profileData.strengths || '[]',
-        weaknesses: profileData.weaknesses || '[]',
-        aiAnalysis: profileData.aiAnalysis || '{}',
-        individualDevelopmentPlan: profileData.individualDevelopmentPlan || '{}'
+        recommendations: profileData.recommendations || [],
+        strengths: profileData.strengths || [],
+        weaknesses: profileData.weaknesses || [],
+        aiAnalysis: profileData.aiAnalysis || {},
+        individualDevelopmentPlan: profileData.individualDevelopmentPlan || {}
       };
-      
-      return chatDatabase.createCandidateProfile(newProfileData);
+
+      return await chatDatabase.createCandidateProfile(newProfileData);
     }
   }
 
   // Получение профиля кандидата
   async getCandidateProfile(sessionId: string): Promise<CandidateProfile | null> {
-    return chatDatabase.getCandidateProfile(sessionId);
+    return await chatDatabase.getCandidateProfile(sessionId);
   }
 
   // Поиск по сообщениям
   async searchMessages(query: string, userId?: string, limit = 50): Promise<ChatMessage[]> {
     // Простой поиск по содержимому (можно расширить для полнотекстового поиска)
-    const sessions = userId 
-      ? chatDatabase.getUserChatSessions(userId, 100)
-      : chatDatabase.getAllCandidateProfiles(100).map(p => ({ id: p.sessionId }));
-    
+    const sessions = userId
+      ? await chatDatabase.getUserChatSessions(userId, 100)
+      : []; // Для поиска без userId нужна другая логика
+
     const results: ChatMessage[] = [];
-    
+
     for (const session of sessions) {
-      const messages = chatDatabase.getChatMessages(session.id);
-      const matchingMessages = messages.filter(msg => 
+      const messages = await chatDatabase.getChatMessages(session.id);
+      const matchingMessages = messages.filter(msg =>
         msg.content.toLowerCase().includes(query.toLowerCase())
       );
       results.push(...matchingMessages);
-      
+
       if (results.length >= limit) break;
     }
-    
+
     return results.slice(0, limit);
   }
 
   // Получение статистики
   async getChatStatistics(userId?: string) {
-    return chatDatabase.getChatStatistics(userId);
+    return await chatDatabase.getChatStatistics(userId);
   }
 
   // Экспорт данных чата в JSON
@@ -208,14 +209,14 @@ export class ChatService {
     messages: ChatMessage[];
     profile?: CandidateProfile;
   }> {
-    const session = chatDatabase.getChatSession(sessionId);
+    const session = await chatDatabase.getChatSession(sessionId);
     if (!session) {
       throw new Error('Session not found');
     }
-    
-    const messages = chatDatabase.getChatMessages(sessionId);
-    const profile = chatDatabase.getCandidateProfile(sessionId);
-    
+
+    const messages = await chatDatabase.getChatMessages(sessionId);
+    const profile = await chatDatabase.getCandidateProfile(sessionId);
+
     return {
       session,
       messages,
@@ -225,7 +226,8 @@ export class ChatService {
 
   // Очистка старых данных
   async cleanupOldChats(daysToKeep = 90): Promise<void> {
-    chatDatabase.cleanupOldData(daysToKeep);
+    // В клиентской версии эта функция не нужна, так как очистка происходит на сервере
+    console.warn('cleanupOldChats is not available in client version');
   }
 
   // Восстановление сессии из localStorage
@@ -266,14 +268,14 @@ export class ChatService {
 
   // Обновление метаданных сессии
   async updateSessionMetadata(sessionId: string, metadata: any): Promise<void> {
-    chatDatabase.updateChatSession(sessionId, {
-      metadata: JSON.stringify(metadata)
+    await chatDatabase.updateChatSession(sessionId, {
+      metadata: metadata
     });
   }
 
   // Получение всех профилей кандидатов (для администраторов)
   async getAllCandidateProfiles(limit = 100): Promise<CandidateProfile[]> {
-    return chatDatabase.getAllCandidateProfiles(limit);
+    return await chatDatabase.getAllCandidateProfiles(limit);
   }
 }
 

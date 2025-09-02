@@ -166,5 +166,9 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Исключаем серверные зависимости из обработки для браузера
+  optimizeDeps: {
+    exclude: ['better-sqlite3']
+  },
   // use default optimizeDeps for proper CJS -> ESM pre-bundling (react/jsx-runtime)
 }));
