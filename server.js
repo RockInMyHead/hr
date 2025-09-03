@@ -23,7 +23,14 @@ console.log('OPENAI_API_KEY:', OPENAI_API_KEY ? '***' + OPENAI_API_KEY.slice(-4)
 
 // CORS middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:4173'],
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:4173',
+    'http://talti.ru',
+    'https://talti.ru',
+    /^https?:\/\/.*\.talti\.ru$/
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -39,7 +46,19 @@ app.use(express.json({ limit: '1mb' }));
 
 // Handle preflight requests
 app.options('/api/openai', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:5173');
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:4173',
+    'http://talti.ru',
+    'https://talti.ru'
+  ];
+
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin) || /^https?:\/\/.*\.talti\.ru$/.test(origin || '')) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+
   res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
