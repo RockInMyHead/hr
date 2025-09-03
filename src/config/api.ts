@@ -1,7 +1,9 @@
 // API Configuration
 export const API_CONFIG = {
-  // Base URL for API calls - в режиме разработки всегда используем localhost:3000
-  baseURL: import.meta.env.DEV ? 'http://localhost:3000' : (import.meta.env.VITE_API_URL || 'http://localhost:3000'),
+  // Base URL for API calls
+  baseURL: import.meta.env.DEV 
+    ? 'http://localhost:3000' 
+    : (import.meta.env.VITE_API_URL || 'https://talti.ru'),
   
   // OpenAI API endpoint
   openaiEndpoint: '/api/openai',
@@ -16,7 +18,7 @@ export const API_CONFIG = {
 export const ENV = {
   isDevelopment: import.meta.env.DEV,
   isProduction: import.meta.env.PROD,
-  apiUrl: import.meta.env.VITE_API_URL,
+  apiUrl: import.meta.env.VITE_API_URL || 'https://talti.ru',
   openaiModel: import.meta.env.VITE_OPENAI_MODEL || 'gpt-4o-mini'
 };
 
