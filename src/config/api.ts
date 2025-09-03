@@ -1,13 +1,14 @@
 // API Configuration
 export const API_CONFIG = {
-  // Base URL for API calls
-  baseURL: import.meta.env.DEV 
-    ? 'http://localhost:3000' 
-    : (import.meta.env.VITE_API_URL || 'https://talti.ru'),
-  
+  // Base URL for API calls - supports multiple deployment options
+  baseURL: import.meta.env.DEV
+    ? 'http://localhost:3000'
+    : (import.meta.env.VITE_API_URL ||
+       (window.location.hostname === 'talti.ru' ? 'https://talti.ru' : window.location.origin)),
+
   // OpenAI API endpoint
   openaiEndpoint: '/api/openai',
-  
+
   // Full OpenAI API URL
   get openaiURL() {
     return `${this.baseURL}${this.openaiEndpoint}`;

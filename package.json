@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "preview": "node node_modules/vite/bin/vite.js preview",
     "start": "node server.js",
-    "deploy": "npm run build && gh-pages -d dist"
+    "proxy": "node proxy-server.js",
+    "deploy": "npm run build && gh-pages -d dist",
+    "deploy:vercel": "./vercel-deploy.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
