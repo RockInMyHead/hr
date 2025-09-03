@@ -144,11 +144,16 @@ export class ChatService {
 
     if (existingProfile) {
       // Обновляем существующий профиль
-      await chatDatabase.updateCandidateProfile(existingProfile.id, profileData);
+      const updateData = {
+        ...profileData,
+        updatedAt: Date.now()
+      };
+      await chatDatabase.updateCandidateProfile(existingProfile.id, updateData);
       const updatedProfile = await chatDatabase.getCandidateProfile(sessionId);
       return updatedProfile!;
     } else {
       // Создаем новый профиль
+      const now = Date.now();
       const newProfileData = {
         sessionId,
         userId: session.userId,
@@ -164,7 +169,9 @@ export class ChatService {
         strengths: profileData.strengths || [],
         weaknesses: profileData.weaknesses || [],
         aiAnalysis: profileData.aiAnalysis || {},
-        individualDevelopmentPlan: profileData.individualDevelopmentPlan || {}
+        individualDevelopmentPlan: profileData.individualDevelopmentPlan || {},
+        createdAt: now,
+        updatedAt: now
       };
 
       return await chatDatabase.createCandidateProfile(newProfileData);

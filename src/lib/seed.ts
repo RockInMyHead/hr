@@ -153,7 +153,7 @@ export function seedDemoEmployees(): void {
     position: director.position ?? 'Директор',
     companyId,
     userRole: 'director',
-    ratings: { communication: 5, leadership: 5, productivity: 5, reliability: 5, initiative: 5 },
+    ratings: { communication: 3.5, leadership: 4.0, productivity: 4.5, reliability: 4.0, initiative: 3.5 },
     x: 100,
     y: 60,
   };
@@ -166,7 +166,7 @@ export function seedDemoEmployees(): void {
     position: manager.position ?? 'Менеджер',
     companyId,
     userRole: 'manager',
-    ratings: { communication: 4, leadership: 4, productivity: 4, reliability: 4, initiative: 4 },
+    ratings: { communication: 3.0, leadership: 3.5, productivity: 3.5, reliability: 4.0, initiative: 3.0 },
     x: 140,
     y: 260,
   } : undefined;
@@ -179,7 +179,7 @@ export function seedDemoEmployees(): void {
     position: employee.position ?? 'Сотрудник',
     companyId,
     userRole: 'employee',
-    ratings: { communication: 4, leadership: 3, productivity: 4, reliability: 4, initiative: 4 },
+    ratings: { communication: 2.5, leadership: 2.0, productivity: 3.0, reliability: 3.5, initiative: 2.5 },
     x: 360,
     y: 260,
   } : undefined;

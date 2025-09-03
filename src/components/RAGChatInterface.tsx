@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { 
-  ArrowLeft, 
-  Brain, 
-  Send, 
-  Bot, 
-  User, 
+import {
+  ArrowLeft,
+  Brain,
+  Send,
+  Bot,
+  User,
   MessageSquare,
   Zap,
   Target,
@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 import RAGService, { ChatMessage, CandidateProfile, KnowledgeItem } from '../services/ragService';
 import { chatService, ChatService } from '../services/chatService';
-import type { AppUser } from '@/types/profile';
+import type { AppUser, MessageType } from '@/types/profile';
+import ChatInput from './ChatInput';
 
 interface RAGChatInterfaceProps {
   user: AppUser;
@@ -149,19 +150,27 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
     }
   };
 
-  const sendMessage = async () => {
-    if (!inputMessage.trim() || isLoading || !currentSessionId) return;
+  const sendMessage = async (message?: string, type: MessageType = 'text', voiceData?: any) => {
+    const messageText = message || inputMessage;
+    if (!messageText.trim() || isLoading || !currentSessionId) return;
 
     setIsLoading(true);
-    const messageText = inputMessage;
-    setInputMessage('');
+    if (!message) {
+      setInputMessage('');
+    }
 
     try {
       // Сохраняем сообщение пользователя в базу данных
       const userMessage = await chatService.addMessage(currentSessionId, {
         role: 'user',
         content: messageText,
-        messageType: 'text'
+        messageType: type,
+        confidence: voiceData?.confidence,
+        metadata: voiceData ? {
+          audioBlob: voiceData.audioBlob,
+          duration: voiceData.duration,
+          ...voiceData
+        } : undefined
       });
 
       setMessages(prev => [...prev, userMessage]);
@@ -249,7 +258,10 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
       });
       
       setCurrentProfile(savedProfile);
-      
+
+      // Обновляем оценки компетенций на основе финального анализа
+      updateCompetencyRatingsFromFinalProfile(finalProfile);
+
       const completionMessage = `Спасибо за интересную беседу! 🎉
 
 Ваш профиль кандидата готов. Основные результаты:
@@ -341,6 +353,104 @@ ${finalProfile.recommendations.slice(0, 3).map(rec => `• ${rec}`).join('\n')}`
     // Запуск новой сессии
     await startNewSession();
     await loadChatHistory(); // Обновляем историю
+  };
+
+  // Функция обновления оценок компетенций на основе финального профиля
+  const updateCompetencyRatingsFromFinalProfile = (finalProfile: any) => {
+    try {
+      // Получаем текущие оценки компетенций
+      const currentRatings = JSON.parse(localStorage.getItem(`competency-data-${user.email}`) || '[]');
+
+      // Анализируем финальный профиль и поведение
+      const summary = finalProfile.summary || '';
+      const overallScore = finalProfile.overallScore || 0;
+
+      // Анализ поведения из финального профиля
+      const hasBehavioralIssues = /груб|агрессив|неуважитель|отказ|негатив|проблем|серьезный минус|не подходит|крайне низкий|непрофессиональ/i.test(summary);
+      const isUnmotivated = /немотивирован|односложн|уклончив|отсутствие интереса|нежелание/i.test(summary);
+      const hasPoorCommunication = /коммуник|уважен|профессионализм|поведен|агрессивное поведение|отказ от сотрудничества/i.test(summary);
+
+      // Обновляем оценки на основе анализа финального профиля
+
+      // Низкий общий балл = снижение всех компетенций
+      if (overallScore < 30) {
+        updateRating(currentRatings, 'communication', -1.0);
+        updateRating(currentRatings, 'leadership', -1.0);
+        updateRating(currentRatings, 'productivity', -1.0);
+        updateRating(currentRatings, 'reliability', -1.0);
+        updateRating(currentRatings, 'initiative', -1.0);
+      } else if (overallScore < 50) {
+        updateRating(currentRatings, 'communication', -0.5);
+        updateRating(currentRatings, 'leadership', -0.5);
+        updateRating(currentRatings, 'productivity', -0.5);
+        updateRating(currentRatings, 'reliability', -0.5);
+        updateRating(currentRatings, 'initiative', -0.5);
+      }
+
+      // Проблемы с поведением = снижение коммуникации и лидерства
+      if (hasBehavioralIssues) {
+        updateRating(currentRatings, 'communication', -0.8);
+        updateRating(currentRatings, 'leadership', -0.8);
+        updateRating(currentRatings, 'reliability', -0.6);
+      }
+
+      // Немотивация = снижение инициативности
+      if (isUnmotivated) {
+        updateRating(currentRatings, 'initiative', -0.7);
+        updateRating(currentRatings, 'productivity', -0.5);
+      }
+
+      // Проблемы с коммуникацией
+      if (hasPoorCommunication) {
+        updateRating(currentRatings, 'communication', -0.6);
+      }
+
+      // Сохраняем обновленные оценки
+      localStorage.setItem(`competency-data-${user.email}`, JSON.stringify(currentRatings));
+
+      console.log('Оценки компетенций обновлены на основе финального профиля:', currentRatings);
+    } catch (error) {
+      console.error('Ошибка при обновлении оценок компетенций из финального профиля:', error);
+    }
+  };
+
+  // Вспомогательная функция для обновления оценки компетенции
+  const updateRating = (ratings: any[], competencyId: string, increment: number) => {
+    const ratingIndex = ratings.findIndex(r => r.competencyId === competencyId);
+
+    if (ratingIndex >= 0) {
+      // Обновляем существующую оценку
+      const currentValue = ratings[ratingIndex].currentValue;
+      const newValue = Math.min(5, Math.max(0, currentValue + increment));
+      ratings[ratingIndex].currentValue = newValue;
+      ratings[ratingIndex].lastAssessed = new Date().toISOString();
+
+      // Обновляем целевое значение на основе текущего
+      ratings[ratingIndex].targetValue = Math.min(5, newValue + 1);
+    } else {
+      // Создаем новую оценку
+      const startValue = Math.max(1, Math.min(5, 3.0 + increment));
+      ratings.push({
+        competencyId,
+        currentValue: startValue,
+        targetValue: Math.min(5, startValue + 1),
+        category: getCompetencyCategory(competencyId),
+        lastAssessed: new Date().toISOString(),
+        improvementPlan: []
+      });
+    }
+  };
+
+  // Вспомогательная функция для определения категории компетенции
+  const getCompetencyCategory = (competencyId: string): string => {
+    const categories: Record<string, string> = {
+      communication: 'soft',
+      leadership: 'leadership',
+      productivity: 'business',
+      reliability: 'soft',
+      initiative: 'soft'
+    };
+    return categories[competencyId] || 'soft';
   };
 
   return (
@@ -507,24 +617,11 @@ ${finalProfile.recommendations.slice(0, 3).map(rec => `• ${rec}`).join('\n')}`
               {/* Ввод сообщения */}
               <div className="p-4 border-t border-white/10">
                 <div className="space-y-3">
-                  <div className="flex gap-3">
-                    <Input
-                      placeholder="Введите ваш ответ... (Enter для отправки)"
-                      value={inputMessage}
-                      onChange={(e) => setInputMessage(e.target.value)}
-                      onKeyPress={handleKeyPress}
-                      className="bg-white/5 border-white/10 text-white placeholder:text-gray-400 flex-1"
-                      disabled={isLoading}
-                    />
-                    <Button
-                      onClick={sendMessage}
-                      disabled={!inputMessage.trim() || isLoading}
-                      className="bg-emerald-600 hover:bg-emerald-700 px-6"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  
+                  <ChatInput
+                    onSendMessage={sendMessage}
+                    isLoading={isLoading}
+                  />
+
                   {messageCount >= 3 && (
                     <Button
                       onClick={generateFinalProfile}
@@ -576,7 +673,10 @@ ${finalProfile.recommendations.slice(0, 3).map(rec => `• ${rec}`).join('\n')}`
                       <div className="flex justify-between text-sm">
                         <span>Время сессии</span>
                         <span className="font-medium">
-                          {Math.round((Date.now() - currentProfile.timestamp) / 60000)} мин
+                          {currentProfile.createdAt
+                            ? Math.round((Date.now() - currentProfile.createdAt) / 60000) + ' мин'
+                            : '0 мин'
+                          }
                         </span>
                       </div>
                     </div>

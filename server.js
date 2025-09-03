@@ -492,6 +492,50 @@ app.post('/api/sessions/clear', (req, res) => {
     res.json({ ok: true });
 });
 
+// ===== VOICE MESSAGES API =====
+
+// Upload voice message
+app.post('/api/voice/upload', (req, res) => {
+    try {
+        // For now, we'll store voice data as base64 in metadata
+        // In production, you might want to save files to disk or cloud storage
+        const { audioData, filename } = req.body;
+
+        if (!audioData) {
+            return res.status(400).json({ error: 'No audio data provided' });
+        }
+
+        // Generate unique filename
+        const uniqueFilename = `voice_${Date.now()}_${filename || 'recording.wav'}`;
+
+        // For demo purposes, we'll just return the data
+        // In production, save to disk or cloud storage
+        res.json({
+            success: true,
+            filename: uniqueFilename,
+            url: `/api/voice/${uniqueFilename}`,
+            size: audioData.length
+        });
+    } catch (error) {
+        console.error('Voice upload error:', error);
+        res.status(500).json({ error: 'Failed to upload voice message' });
+    }
+});
+
+// Get voice message
+app.get('/api/voice/:filename', (req, res) => {
+    try {
+        const { filename } = req.params;
+
+        // For demo purposes, return a placeholder
+        // In production, serve the actual file from disk or cloud storage
+        res.status(404).json({ error: 'Voice file not found' });
+    } catch (error) {
+        console.error('Voice get error:', error);
+        res.status(500).json({ error: 'Failed to get voice message' });
+    }
+});
+
 // Static files
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get(/.*/, (_req, res) => {

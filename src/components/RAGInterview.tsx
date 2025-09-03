@@ -382,7 +382,10 @@ export const RAGInterview: React.FC<RAGInterviewProps> = ({
                   <div className="flex justify-between text-sm">
                     <span>Время сессии</span>
                     <span className="font-medium">
-                      {Math.round((Date.now() - currentProfile.timestamp) / 60000)} мин
+                      {currentProfile.createdAt
+                        ? Math.round((Date.now() - currentProfile.createdAt) / 60000) + ' мин'
+                        : '0 мин'
+                      }
                     </span>
                   </div>
                 </div>

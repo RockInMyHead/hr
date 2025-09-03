@@ -18,14 +18,18 @@ export interface UserProfile {
   problemSolving?: string;
 }
 
-export type MessageType = 'text' | 'voice';
+export type MessageType = 'text' | 'voice' | 'file';
 
 export interface Message {
   id: string;
   text: string;
   isUser: boolean;
   timestamp: Date;
-  type?: MessageType; // Добавляем тип сообщения
+  type?: MessageType; // Тип сообщения: текст, голос, файл
+  confidence?: number; // Для голосовых сообщений - уровень уверенности распознавания
+  audioUrl?: string; // URL для голосового файла
+  fileUrl?: string; // URL для файла
+  metadata?: any; // Дополнительные метаданные
 } 
 
 import { UserRole } from './roles';

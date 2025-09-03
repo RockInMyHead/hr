@@ -194,7 +194,7 @@ export function Assessment360({ user, onBack }: Assessment360Props) {
     }
   };
 
-  // Генерация ответа ИИ (имитация ChatGPT)
+  // Генерация ответа ИИ
   const generateAIResponse = async (session: AssessmentSession, userMessage: ChatMessage): Promise<string> => {
     const messageCount = session.messages.filter(m => m.role === 'user').length;
     const competencies = Object.keys(STANDARD_COMPETENCIES);
@@ -306,7 +306,7 @@ export function Assessment360({ user, onBack }: Assessment360Props) {
             </Button>
             <div>
               <h1 className="text-3xl font-bold text-white">360° Оценка с ИИ</h1>
-              <p className="text-gray-400 text-sm">Интеллектуальная система оценки компетенций с ChatGPT</p>
+              <p className="text-gray-400 text-sm">Интеллектуальная система оценки компетенций</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
