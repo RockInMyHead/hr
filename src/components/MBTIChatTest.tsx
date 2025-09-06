@@ -61,7 +61,7 @@ interface ChatSession {
   mbtiResult?: MBTIProfile;
 }
 
-// Система промптов для ИИ
+// Система промптов для ChatGPT
 const MBTI_SYSTEM_PROMPTS = {
   intro: `Вы - опытный психолог, специализирующийся на тестировании личности по методике MBTI.
 Ваш стиль: дружелюбный, профессиональный, эмпатичный.
@@ -139,8 +139,8 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session?.messages]);
 
-  // Симуляция ответа ИИ
-  const simulateAIResponse = async (userMessage: string, phase: number): Promise<string> => {
+  // Симуляция ответа ChatGPT
+  const simulateChatGPTResponse = async (userMessage: string, phase: number): Promise<string> => {
     await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 2000));
 
     const responses = {
@@ -267,8 +267,8 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
     setCurrentMessage('');
     setIsTyping(true);
 
-    // Получаем ответ от ИИ
-    const aiResponse = await simulateAIResponse(currentMessage, session.currentPhase);
+    // Получаем ответ от "ChatGPT"
+    const aiResponse = await simulateChatGPTResponse(currentMessage, session.currentPhase);
 
     setIsTyping(false);
 

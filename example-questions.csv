@@ -1,6 +1,0 @@
-question,answer,category,tags,difficulty
-"Расскажите о себе и своем опыте работы","Кандидат должен кратко рассказать о своем профессиональном пути, ключевых достижениях, навыках и мотивации.","общие вопросы","опыт;мотивация;самопрезентация",junior
-"Что такое замыкания в JavaScript?","Замыкание - это комбинация функции и лексического окружения, в котором эта функция была объявлена.","javascript","замыкания;область видимости;функции",middle
-"Объясните разницу между var, let и const","var имеет функциональную область видимости, let и const - блочную. const нельзя переназначить.","javascript","переменные;область видимости;ES6",junior
-"Что такое Virtual DOM в React?","Virtual DOM - это JavaScript представление реального DOM в памяти для оптимизации обновлений.","react","virtual dom;производительность;reconciliation",middle
-"Опишите принципы SOLID","SOLID - пять принципов ООП: Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion.","архитектура","SOLID;ООП;принципы проектирования",senior

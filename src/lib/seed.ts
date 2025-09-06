@@ -33,7 +33,6 @@ function upsertUserByEmail(users: AppUser[], candidate: AppUser): AppUser[] {
     const existing = users[index];
     users[index] = {
       ...existing,
-      // ensure demo name/role/company are correct, but keep stable id
       name: candidate.name ?? existing.name,
       role: candidate.role ?? existing.role,
       companyId: candidate.companyId ?? existing.companyId,
@@ -44,76 +43,8 @@ function upsertUserByEmail(users: AppUser[], candidate: AppUser): AppUser[] {
 }
 
 export function seedDemoUsers(): void {
-  // Avoid seeding repeatedly if users already exist with demo emails
-  let users = readUsersFromStorage();
-
-  const hasAnyDemo = users.some((u) =>
-    ['director@demo.local', 'manager@demo.local', 'employee@demo.local', 'director@example.com', 'manager@example.com', 'employee@example.com']
-      .includes(u.email.toLowerCase())
-  );
-
-  // Determine companyId: prefer existing director's companyId if present
-  const existingDirector = users.find((u) => u.role === 'administrator');
-  const demoCompanyId = existingDirector?.companyId ?? generateStableId();
-
-  const directorEmail = 'director@demo.local';
-  const managerEmail = 'manager@demo.local';
-  const employeeEmail = 'employee@demo.local';
-
-  const demoDirector: AppUser = {
-    id: generateStableId(),
-    name: 'Администратор Демо',
-    email: directorEmail,
-    role: 'administrator',
-    companyId: demoCompanyId,
-    position: 'Генеральный директор',
-  };
-
-  const demoManager: AppUser = {
-    id: generateStableId(),
-    name: 'Менеджер Демо',
-    email: managerEmail,
-    role: 'manager',
-    companyId: demoCompanyId,
-    position: 'Руководитель отдела продаж',
-  };
-
-  const demoEmployee: AppUser = {
-    id: generateStableId(),
-    name: 'Сотрудник Демо',
-    email: employeeEmail,
-    role: 'employee',
-    companyId: demoCompanyId,
-    position: 'Специалист по обслуживанию клиентов',
-  };
-
-  // Дополнительные демо-пользователи для разных ролей
-  const demoAdmin: AppUser = {
-    id: generateStableId(),
-    name: 'Администратор Демо',
-    email: 'admin@demo.local',
-    role: 'administrator',
-    companyId: demoCompanyId,
-    position: 'Системный администратор',
-  };
-
-  const demoManager2: AppUser = {
-    id: generateStableId(),
-    name: 'Руководитель отдела продаж',
-    email: 'sales-manager@demo.local',
-    role: 'manager',
-    companyId: demoCompanyId,
-    position: 'Руководитель отдела продаж',
-  };
-
-  // Always upsert (id and company will be preserved/merged for existing)
-  users = upsertUserByEmail(users, demoDirector);
-  users = upsertUserByEmail(users, demoManager);
-  users = upsertUserByEmail(users, demoEmployee);
-  users = upsertUserByEmail(users, demoAdmin);
-  users = upsertUserByEmail(users, demoManager2);
-
-  writeUsersToStorage(users);
+  // Demo users seeding disabled
+  return;
 }
 
 function readEmployeesFromStorage(): Employee[] {
@@ -135,58 +66,7 @@ function writeEmployeesToStorage(list: Employee[]): void {
 }
 
 export function seedDemoEmployees(): void {
-  const existingEmployees = readEmployeesFromStorage();
-  if (existingEmployees.length > 0) return; // не перезаписываем, если уже есть данные
-
-  const users = readUsersFromStorage();
-  const director = users.find(u => u.role === 'director');
-  const manager = users.find(u => u.role === 'manager');
-  const employee = users.find(u => u.role === 'employee');
-  if (!director) return;
-  const companyId = director.companyId ?? generateStableId();
-
-  const dirEmp: Employee = {
-    id: generateStableId(),
-    name: director.name,
-    email: director.email,
-    role: 'subordinate',
-    position: director.position ?? 'Директор',
-    companyId,
-    userRole: 'director',
-    ratings: { communication: 3.5, leadership: 4.0, productivity: 4.5, reliability: 4.0, initiative: 3.5 },
-    x: 100,
-    y: 60,
-  };
-
-  const mgrEmp: Employee | undefined = manager ? {
-    id: generateStableId(),
-    name: manager.name,
-    email: manager.email,
-    role: 'subordinate',
-    position: manager.position ?? 'Менеджер',
-    companyId,
-    userRole: 'manager',
-    ratings: { communication: 3.0, leadership: 3.5, productivity: 3.5, reliability: 4.0, initiative: 3.0 },
-    x: 140,
-    y: 260,
-  } : undefined;
-
-  const empEmp: Employee | undefined = employee ? {
-    id: generateStableId(),
-    name: employee.name,
-    email: employee.email,
-    role: 'subordinate',
-    position: employee.position ?? 'Сотрудник',
-    companyId,
-    userRole: 'employee',
-    ratings: { communication: 2.5, leadership: 2.0, productivity: 3.0, reliability: 3.5, initiative: 2.5 },
-    x: 360,
-    y: 260,
-  } : undefined;
-
-  const list: Employee[] = [dirEmp];
-  if (mgrEmp) list.push(mgrEmp);
-  if (empEmp) list.push({ ...empEmp, managerId: mgrEmp?.id });
-  writeEmployeesToStorage(list);
+  // Demo employees seeding disabled
+  return;
 }
 

@@ -1,5 +1,49 @@
-import { chatDatabase, ChatSession, ChatMessage, CandidateProfile } from '@/lib/database';
 import type { AppUser } from '@/types/profile';
+
+// Интерфейсы для API
+export interface ChatSession {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  startTime: number;
+  endTime?: number;
+  status: 'active' | 'completed' | 'paused';
+  sessionType: 'rag-chat' | 'enhanced-interview' | 'assessment-360' | 'mbti-chat';
+  metadata?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+  messageType?: 'text' | 'voice' | 'file';
+  confidence?: number;
+  metadata?: string;
+}
+
+export interface CandidateProfile {
+  id: string;
+  sessionId: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  position?: string;
+  department?: string;
+  overallScore: number;
+  technicalSkills: string;
+  softSkills: string;
+  summary: string;
+  recommendations: string;
+  strengths: string;
+  weaknesses: string;
+  aiAnalysis: string;
+  individualDevelopmentPlan: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 // Интерфейс для создания сессии чата
 export interface CreateChatSessionData {
@@ -26,6 +70,7 @@ export interface ChatHistory {
 
 export class ChatService {
   private activeSession: ChatSession | null = null;
+  private apiBaseUrl = '/api';
 
   // Создание новой сессии чата
   async createChatSession(data: CreateChatSessionData): Promise<ChatSession> {
@@ -36,11 +81,21 @@ export class ChatService {
       startTime: Date.now(),
       status: 'active' as const,
       sessionType: data.sessionType,
-      metadata: data.metadata
+      metadata: data.metadata ? JSON.stringify(data.metadata) : undefined
     };
 
-    this.activeSession = await chatDatabase.createChatSession(sessionData);
+    const response = await fetch(`${this.apiBaseUrl}/chat-sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sessionData)
+    });
 
+    if (!response.ok) {
+      throw new Error('Failed to create chat session');
+    }
+
+    this.activeSession = await response.json();
+    
     // Добавляем системное сообщение о начале сессии
     await this.addSystemMessage(
       this.activeSession.id,
@@ -57,7 +112,11 @@ export class ChatService {
 
   // Загрузка существующей сессии
   async loadSession(sessionId: string): Promise<ChatSession | null> {
-    const session = await chatDatabase.getChatSession(sessionId);
+    const response = await fetch(`${this.apiBaseUrl}/chat-sessions/${sessionId}`);
+    if (!response.ok) {
+      return null;
+    }
+    const session = await response.json();
     if (session) {
       this.activeSession = session;
     }
@@ -69,9 +128,13 @@ export class ChatService {
     const targetSessionId = sessionId || this.activeSession?.id;
     if (!targetSessionId) return;
 
-    await chatDatabase.updateChatSession(targetSessionId, {
-      endTime: Date.now(),
-      status: 'completed'
+    await fetch(`${this.apiBaseUrl}/chat-sessions/${targetSessionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endTime: Date.now(),
+        status: 'completed'
+      })
     });
 
     if (this.activeSession?.id === targetSessionId) {
@@ -88,10 +151,20 @@ export class ChatService {
       timestamp: Date.now(),
       messageType: messageData.messageType || 'text',
       confidence: messageData.confidence,
-      metadata: messageData.metadata
+      metadata: messageData.metadata ? JSON.stringify(messageData.metadata) : undefined
     };
 
-    return await chatDatabase.addChatMessage(message);
+    const response = await fetch(`${this.apiBaseUrl}/chat-messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message)
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to add message');
+    }
+
+    return response.json();
   }
 
   // Добавление системного сообщения
@@ -105,55 +178,70 @@ export class ChatService {
 
   // Получение всех сообщений сессии
   async getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-    return await chatDatabase.getChatMessages(sessionId);
+    const response = await fetch(`${this.apiBaseUrl}/chat-messages/${sessionId}`);
+    if (!response.ok) {
+      return [];
+    }
+    return response.json();
   }
 
   // Получение последних сообщений сессии
   async getRecentMessages(sessionId: string, limit = 20): Promise<ChatMessage[]> {
-    return await chatDatabase.getRecentChatMessages(sessionId, limit);
+    const response = await fetch(`${this.apiBaseUrl}/chat-messages/${sessionId}/recent?limit=${limit}`);
+    if (!response.ok) {
+      return [];
+    }
+    return response.json();
   }
 
   // Получение истории чатов пользователя
   async getUserChatHistory(userId: string, limit = 10): Promise<ChatHistory[]> {
-    const sessions = await chatDatabase.getUserChatSessions(userId, limit);
-
+    const response = await fetch(`${this.apiBaseUrl}/chat-sessions?userId=${userId}&limit=${limit}`);
+    if (!response.ok) {
+      return [];
+    }
+    const sessions = await response.json();
+    
     const history: ChatHistory[] = [];
-
+    
     for (const session of sessions) {
-      const messages = await chatDatabase.getChatMessages(session.id);
-      const profile = await chatDatabase.getCandidateProfile(session.id);
-
+      const messages = await this.getSessionMessages(session.id);
+      const profile = await this.getCandidateProfile(session.id);
+      
       history.push({
         session,
         messages,
         profile: profile || undefined
       });
     }
-
+    
     return history;
   }
 
   // Сохранение профиля кандидата
   async saveCandidateProfile(sessionId: string, profileData: Partial<CandidateProfile>): Promise<CandidateProfile> {
-    const session = await chatDatabase.getChatSession(sessionId);
+    const session = await this.loadSession(sessionId);
     if (!session) {
       throw new Error('Session not found');
     }
 
-    const existingProfile = await chatDatabase.getCandidateProfile(sessionId);
-
+    const existingProfile = await this.getCandidateProfile(sessionId);
+    
     if (existingProfile) {
       // Обновляем существующий профиль
-      const updateData = {
-        ...profileData,
-        updatedAt: Date.now()
-      };
-      await chatDatabase.updateCandidateProfile(existingProfile.id, updateData);
-      const updatedProfile = await chatDatabase.getCandidateProfile(sessionId);
-      return updatedProfile!;
+      const response = await fetch(`${this.apiBaseUrl}/candidate-profiles/${existingProfile.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profileData)
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update profile');
+      }
+      
+      return this.getCandidateProfile(sessionId)!;
     } else {
       // Создаем новый профиль
-      const now = Date.now();
       const newProfileData = {
         sessionId,
         userId: session.userId,
@@ -162,52 +250,77 @@ export class ChatService {
         position: profileData.position || '',
         department: profileData.department || '',
         overallScore: profileData.overallScore || 0,
-        technicalSkills: profileData.technicalSkills || {},
-        softSkills: profileData.softSkills || {},
+        technicalSkills: profileData.technicalSkills || '{}',
+        softSkills: profileData.softSkills || '{}',
         summary: profileData.summary || '',
-        recommendations: profileData.recommendations || [],
-        strengths: profileData.strengths || [],
-        weaknesses: profileData.weaknesses || [],
-        aiAnalysis: profileData.aiAnalysis || {},
-        individualDevelopmentPlan: profileData.individualDevelopmentPlan || {},
-        createdAt: now,
-        updatedAt: now
+        recommendations: profileData.recommendations || '[]',
+        strengths: profileData.strengths || '[]',
+        weaknesses: profileData.weaknesses || '[]',
+        aiAnalysis: profileData.aiAnalysis || '{}',
+        individualDevelopmentPlan: profileData.individualDevelopmentPlan || '{}'
       };
-
-      return await chatDatabase.createCandidateProfile(newProfileData);
+      
+      const response = await fetch(`${this.apiBaseUrl}/candidate-profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProfileData)
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create profile');
+      }
+      
+      return response.json();
     }
   }
 
   // Получение профиля кандидата
   async getCandidateProfile(sessionId: string): Promise<CandidateProfile | null> {
-    return await chatDatabase.getCandidateProfile(sessionId);
+    const response = await fetch(`${this.apiBaseUrl}/candidate-profiles/${sessionId}`);
+    if (!response.ok) {
+      return null;
+    }
+    return response.json();
   }
 
   // Поиск по сообщениям
   async searchMessages(query: string, userId?: string, limit = 50): Promise<ChatMessage[]> {
     // Простой поиск по содержимому (можно расширить для полнотекстового поиска)
-    const sessions = userId
-      ? await chatDatabase.getUserChatSessions(userId, 100)
-      : []; // Для поиска без userId нужна другая логика
-
+    const sessions = userId 
+      ? await this.getUserChatHistory(userId, 100).then(h => h.map(h => h.session))
+      : [];
+    
     const results: ChatMessage[] = [];
-
+    
     for (const session of sessions) {
-      const messages = await chatDatabase.getChatMessages(session.id);
-      const matchingMessages = messages.filter(msg =>
+      const messages = await this.getSessionMessages(session.id);
+      const matchingMessages = messages.filter(msg => 
         msg.content.toLowerCase().includes(query.toLowerCase())
       );
       results.push(...matchingMessages);
-
+      
       if (results.length >= limit) break;
     }
-
+    
     return results.slice(0, limit);
   }
 
   // Получение статистики
   async getChatStatistics(userId?: string) {
-    return await chatDatabase.getChatStatistics(userId);
+    const url = userId 
+      ? `${this.apiBaseUrl}/statistics?userId=${userId}`
+      : `${this.apiBaseUrl}/statistics`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      return {
+        totalSessions: 0,
+        totalMessages: 0,
+        averageSessionDuration: 0,
+        completedProfiles: 0
+      };
+    }
+    return response.json();
   }
 
   // Экспорт данных чата в JSON
@@ -216,14 +329,14 @@ export class ChatService {
     messages: ChatMessage[];
     profile?: CandidateProfile;
   }> {
-    const session = await chatDatabase.getChatSession(sessionId);
+    const session = await this.loadSession(sessionId);
     if (!session) {
       throw new Error('Session not found');
     }
-
-    const messages = await chatDatabase.getChatMessages(sessionId);
-    const profile = await chatDatabase.getCandidateProfile(sessionId);
-
+    
+    const messages = await this.getSessionMessages(sessionId);
+    const profile = await this.getCandidateProfile(sessionId);
+    
     return {
       session,
       messages,
@@ -231,10 +344,10 @@ export class ChatService {
     };
   }
 
-  // Очистка старых данных
+  // Очистка старых данных (только для сервера)
   async cleanupOldChats(daysToKeep = 90): Promise<void> {
-    // В клиентской версии эта функция не нужна, так как очистка происходит на сервере
-    console.warn('cleanupOldChats is not available in client version');
+    // Этот метод должен вызываться только на сервере
+    console.warn('cleanupOldChats should be called on server side only');
   }
 
   // Восстановление сессии из localStorage
@@ -275,14 +388,20 @@ export class ChatService {
 
   // Обновление метаданных сессии
   async updateSessionMetadata(sessionId: string, metadata: any): Promise<void> {
-    await chatDatabase.updateChatSession(sessionId, {
-      metadata: metadata
+    await fetch(`${this.apiBaseUrl}/chat-sessions/${sessionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        metadata: JSON.stringify(metadata)
+      })
     });
   }
 
   // Получение всех профилей кандидатов (для администраторов)
   async getAllCandidateProfiles(limit = 100): Promise<CandidateProfile[]> {
-    return await chatDatabase.getAllCandidateProfiles(limit);
+    // Этот метод требует дополнительной реализации на сервере
+    console.warn('getAllCandidateProfiles not implemented in API yet');
+    return [];
   }
 }
 

@@ -33,26 +33,14 @@ export function AuthForm({ onAuthSuccess }: AuthFormProps) {
         if (existing) {
           onAuthSuccess(existing as AppUser);
         } else {
-          // Демо-аккаунты по email
+          // Создаем временного пользователя-сотрудника, если email не найден
           const id = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-          let user: AppUser | null = null;
-          if (email === 'managing-director@demo.local' || email === 'managing-director@example.com') {
-            user = { id, name: 'Управляющий директор Демо', email, role: 'managing_director', companyId: (globalThis.crypto?.randomUUID?.() ?? id) };
-          } else if (email === 'director@demo.local' || email === 'director@example.com') {
-            user = { id, name: 'Директор Демо', email, role: 'director', companyId: (globalThis.crypto?.randomUUID?.() ?? id) };
-          } else if (email === 'manager@demo.local' || email === 'manager@example.com') {
-            user = { id, name: 'Менеджер Демо', email, role: 'manager' };
-          } else if (email === 'employee@demo.local' || email === 'employee@example.com') {
-            user = { id, name: 'Сотрудник Демо', email, role: 'employee' };
-          } else {
-            // Создаем временного пользователя-сотрудника, если email не найден
-            user = {
-              id,
-              name: email.split('@')[0] || 'Пользователь',
-              email,
-              role: "employee",
-            };
-          }
+          const user: AppUser = {
+            id,
+            name: email.split('@')[0] || 'Пользователь',
+            email,
+            role: "employee",
+          };
           try {
             saveUser(user);
           } catch (error) {

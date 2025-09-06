@@ -1,4 +1,7 @@
-// Типы для базы данных (клиентская версия)
+import Database from 'better-sqlite3';
+import path from 'path';
+
+// Типы для базы данных
 export interface ChatSession {
   id: string;
   userId: string;
@@ -8,7 +11,7 @@ export interface ChatSession {
   endTime?: number;
   status: 'active' | 'completed' | 'paused';
   sessionType: 'rag-chat' | 'enhanced-interview' | 'assessment-360' | 'mbti-chat';
-  metadata?: any; // Объект с дополнительными данными
+  metadata?: string; // JSON строка с дополнительными данными
 }
 
 export interface ChatMessage {
@@ -19,7 +22,7 @@ export interface ChatMessage {
   timestamp: number;
   messageType?: 'text' | 'voice' | 'file';
   confidence?: number; // Для голосовых сообщений
-  metadata?: any; // Объект с дополнительными данными
+  metadata?: string; // JSON строка с дополнительными данными
 }
 
 export interface CandidateProfile {
@@ -31,14 +34,14 @@ export interface CandidateProfile {
   position?: string;
   department?: string;
   overallScore: number;
-  technicalSkills: any; // Объект
-  softSkills: any; // Объект
+  technicalSkills: string; // JSON строка
+  softSkills: string; // JSON строка
   summary: string;
-  recommendations: any[]; // Массив
-  strengths: any[]; // Массив
-  weaknesses: any[]; // Массив
-  aiAnalysis: any; // Объект
-  individualDevelopmentPlan: any; // Объект
+  recommendations: string; // JSON массив
+  strengths: string; // JSON массив
+  weaknesses: string; // JSON массив
+  aiAnalysis: string; // JSON объект
+  individualDevelopmentPlan: string; // JSON объект
   createdAt: number;
   updatedAt: number;
 }
@@ -47,7 +50,7 @@ export interface KnowledgeBaseItem {
   id: string;
   category: string;
   question: string;
-  keywords: any[]; // Массив
+  keywords: string; // JSON массив
   difficulty: 'junior' | 'middle' | 'senior';
   competency: string;
   createdAt: number;
@@ -55,174 +58,362 @@ export interface KnowledgeBaseItem {
   isActive: boolean;
 }
 
-export interface ChatStatistics {
-  totalSessions: number;
-  totalMessages: number;
-  averageSessionDuration: number;
-  completedProfiles: number;
-}
-
-// Клиентская версия ChatDatabase - работает через API
 export class ChatDatabase {
-  private apiBase = '/api';
+  private db: Database.Database;
+
+  constructor(dbPath?: string) {
+    const defaultPath = path.join(process.cwd(), 'data', 'hr-chat.db');
+    this.db = new Database(dbPath || defaultPath);
+    this.initializeTables();
+  }
+
+  private initializeTables() {
+    // Таблица сессий чата
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_sessions (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        userName TEXT NOT NULL,
+        userEmail TEXT NOT NULL,
+        startTime INTEGER NOT NULL,
+        endTime INTEGER,
+        status TEXT NOT NULL DEFAULT 'active',
+        sessionType TEXT NOT NULL,
+        metadata TEXT,
+        FOREIGN KEY (userId) REFERENCES users (id)
+      )
+    `);
+
+    // Таблица сообщений
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id TEXT PRIMARY KEY,
+        sessionId TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        messageType TEXT DEFAULT 'text',
+        confidence REAL,
+        metadata TEXT,
+        FOREIGN KEY (sessionId) REFERENCES chat_sessions (id) ON DELETE CASCADE
+      )
+    `);
+
+    // Таблица профилей кандидатов
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS candidate_profiles (
+        id TEXT PRIMARY KEY,
+        sessionId TEXT NOT NULL,
+        userId TEXT NOT NULL,
+        fullName TEXT NOT NULL,
+        email TEXT NOT NULL,
+        position TEXT,
+        department TEXT,
+        overallScore INTEGER NOT NULL DEFAULT 0,
+        technicalSkills TEXT NOT NULL DEFAULT '{}',
+        softSkills TEXT NOT NULL DEFAULT '{}',
+        summary TEXT NOT NULL DEFAULT '',
+        recommendations TEXT NOT NULL DEFAULT '[]',
+        strengths TEXT NOT NULL DEFAULT '[]',
+        weaknesses TEXT NOT NULL DEFAULT '[]',
+        aiAnalysis TEXT NOT NULL DEFAULT '{}',
+        individualDevelopmentPlan TEXT NOT NULL DEFAULT '{}',
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        FOREIGN KEY (sessionId) REFERENCES chat_sessions (id) ON DELETE CASCADE
+      )
+    `);
+
+    // Таблица базы знаний
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_base (
+        id TEXT PRIMARY KEY,
+        category TEXT NOT NULL,
+        question TEXT NOT NULL,
+        keywords TEXT NOT NULL DEFAULT '[]',
+        difficulty TEXT NOT NULL DEFAULT 'middle',
+        competency TEXT NOT NULL,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        isActive BOOLEAN NOT NULL DEFAULT 1
+      )
+    `);
+
+    // Таблица пользователей (если еще не существует)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        role TEXT NOT NULL,
+        createdAt INTEGER NOT NULL DEFAULT ${Date.now()},
+        lastLoginAt INTEGER
+      )
+    `);
+
+    // Создаем индексы для лучшей производительности
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(sessionId);
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(userId);
+      CREATE INDEX IF NOT EXISTS idx_chat_sessions_start_time ON chat_sessions(startTime);
+      CREATE INDEX IF NOT EXISTS idx_candidate_profiles_session ON candidate_profiles(sessionId);
+      CREATE INDEX IF NOT EXISTS idx_candidate_profiles_user ON candidate_profiles(userId);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_base_category ON knowledge_base(category);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_base_difficulty ON knowledge_base(difficulty);
+    `);
+  }
 
   // Методы для работы с сессиями
-  async createChatSession(session: Omit<ChatSession, 'id'>): Promise<ChatSession> {
-    const response = await fetch(`${this.apiBase}/chat-sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(session)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to create session: ${response.statusText}`);
-    }
-
-    return response.json();
+  createChatSession(session: Omit<ChatSession, 'id'>): ChatSession {
+    const id = this.generateId();
+    const newSession: ChatSession = { id, ...session };
+    
+    const stmt = this.db.prepare(`
+      INSERT INTO chat_sessions (id, userId, userName, userEmail, startTime, endTime, status, sessionType, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      newSession.id,
+      newSession.userId,
+      newSession.userName,
+      newSession.userEmail,
+      newSession.startTime,
+      newSession.endTime || null,
+      newSession.status,
+      newSession.sessionType,
+      newSession.metadata || null
+    );
+    
+    return newSession;
   }
 
-  async getChatSession(sessionId: string): Promise<ChatSession | null> {
-    const response = await fetch(`${this.apiBase}/chat-sessions/${sessionId}`);
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Failed to get session: ${response.statusText}`);
-    }
-
-    return response.json();
+  getChatSession(sessionId: string): ChatSession | null {
+    const stmt = this.db.prepare('SELECT * FROM chat_sessions WHERE id = ?');
+    return stmt.get(sessionId) as ChatSession | null;
   }
 
-  async updateChatSession(sessionId: string, updates: Partial<ChatSession>): Promise<void> {
-    const response = await fetch(`${this.apiBase}/chat-sessions/${sessionId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
+  updateChatSession(sessionId: string, updates: Partial<ChatSession>): void {
+    const fields = Object.keys(updates).filter(key => key !== 'id');
+    if (fields.length === 0) return;
 
-    if (!response.ok) {
-      throw new Error(`Failed to update session: ${response.statusText}`);
-    }
+    const setClause = fields.map(field => `${field} = ?`).join(', ');
+    const values = fields.map(field => updates[field as keyof ChatSession]);
+    
+    const stmt = this.db.prepare(`UPDATE chat_sessions SET ${setClause} WHERE id = ?`);
+    stmt.run(...values, sessionId);
   }
 
-  async getUserChatSessions(userId: string, limit = 50): Promise<ChatSession[]> {
-    const response = await fetch(`${this.apiBase}/chat-sessions?userId=${encodeURIComponent(userId)}&limit=${limit}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to get sessions: ${response.statusText}`);
-    }
-
-    return response.json();
+  getUserChatSessions(userId: string, limit = 50): ChatSession[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM chat_sessions 
+      WHERE userId = ? 
+      ORDER BY startTime DESC 
+      LIMIT ?
+    `);
+    return stmt.all(userId, limit) as ChatSession[];
   }
 
   // Методы для работы с сообщениями
-  async addChatMessage(message: Omit<ChatMessage, 'id'>): Promise<ChatMessage> {
-    const response = await fetch(`${this.apiBase}/chat-messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(message)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to add message: ${response.statusText}`);
-    }
-
-    return response.json();
+  addChatMessage(message: Omit<ChatMessage, 'id'>): ChatMessage {
+    const id = this.generateId();
+    const newMessage: ChatMessage = { id, ...message };
+    
+    const stmt = this.db.prepare(`
+      INSERT INTO chat_messages (id, sessionId, role, content, timestamp, messageType, confidence, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      newMessage.id,
+      newMessage.sessionId,
+      newMessage.role,
+      newMessage.content,
+      newMessage.timestamp,
+      newMessage.messageType || 'text',
+      newMessage.confidence || null,
+      newMessage.metadata || null
+    );
+    
+    return newMessage;
   }
 
-  async getChatMessages(sessionId: string): Promise<ChatMessage[]> {
-    const response = await fetch(`${this.apiBase}/chat-messages/${sessionId}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to get messages: ${response.statusText}`);
-    }
-
-    return response.json();
+  getChatMessages(sessionId: string): ChatMessage[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM chat_messages 
+      WHERE sessionId = ? 
+      ORDER BY timestamp ASC
+    `);
+    return stmt.all(sessionId) as ChatMessage[];
   }
 
-  async getRecentChatMessages(sessionId: string, limit = 20): Promise<ChatMessage[]> {
-    const response = await fetch(`${this.apiBase}/chat-messages/${sessionId}/recent?limit=${limit}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to get recent messages: ${response.statusText}`);
-    }
-
-    return response.json();
+  getRecentChatMessages(sessionId: string, limit = 20): ChatMessage[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM chat_messages 
+      WHERE sessionId = ? 
+      ORDER BY timestamp DESC 
+      LIMIT ?
+    `);
+    const messages = stmt.all(sessionId, limit) as ChatMessage[];
+    return messages.reverse(); // Возвращаем в правильном порядке
   }
 
   // Методы для работы с профилями кандидатов
-  async createCandidateProfile(profile: Omit<CandidateProfile, 'id' | 'createdAt' | 'updatedAt'>): Promise<CandidateProfile> {
-    const response = await fetch(`${this.apiBase}/candidate-profiles`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(profile)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to create profile: ${response.statusText}`);
-    }
-
-    return response.json();
+  createCandidateProfile(profile: Omit<CandidateProfile, 'id' | 'createdAt' | 'updatedAt'>): CandidateProfile {
+    const id = this.generateId();
+    const now = Date.now();
+    const newProfile: CandidateProfile = {
+      id,
+      ...profile,
+      createdAt: now,
+      updatedAt: now
+    };
+    
+    const stmt = this.db.prepare(`
+      INSERT INTO candidate_profiles (
+        id, sessionId, userId, fullName, email, position, department,
+        overallScore, technicalSkills, softSkills, summary, recommendations,
+        strengths, weaknesses, aiAnalysis, individualDevelopmentPlan,
+        createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      newProfile.id,
+      newProfile.sessionId,
+      newProfile.userId,
+      newProfile.fullName,
+      newProfile.email,
+      newProfile.position || null,
+      newProfile.department || null,
+      newProfile.overallScore,
+      newProfile.technicalSkills,
+      newProfile.softSkills,
+      newProfile.summary,
+      newProfile.recommendations,
+      newProfile.strengths,
+      newProfile.weaknesses,
+      newProfile.aiAnalysis,
+      newProfile.individualDevelopmentPlan,
+      newProfile.createdAt,
+      newProfile.updatedAt
+    );
+    
+    return newProfile;
   }
 
-  async updateCandidateProfile(profileId: string, updates: Partial<CandidateProfile>): Promise<void> {
-    const response = await fetch(`${this.apiBase}/candidate-profiles/${profileId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
+  updateCandidateProfile(profileId: string, updates: Partial<CandidateProfile>): void {
+    const fields = Object.keys(updates).filter(key => !['id', 'createdAt'].includes(key));
+    if (fields.length === 0) return;
 
-    if (!response.ok) {
-      throw new Error(`Failed to update profile: ${response.statusText}`);
-    }
+    fields.push('updatedAt');
+    const setClause = fields.map(field => `${field} = ?`).join(', ');
+    const values = fields.map(field => field === 'updatedAt' ? Date.now() : updates[field as keyof CandidateProfile]);
+    
+    const stmt = this.db.prepare(`UPDATE candidate_profiles SET ${setClause} WHERE id = ?`);
+    stmt.run(...values, profileId);
   }
 
-  async getCandidateProfile(sessionId: string): Promise<CandidateProfile | null> {
-    const response = await fetch(`${this.apiBase}/candidate-profiles/${sessionId}`);
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Failed to get profile: ${response.statusText}`);
-    }
-
-    return response.json();
+  getCandidateProfile(sessionId: string): CandidateProfile | null {
+    const stmt = this.db.prepare('SELECT * FROM candidate_profiles WHERE sessionId = ?');
+    return stmt.get(sessionId) as CandidateProfile | null;
   }
 
-  async getAllCandidateProfiles(limit = 100): Promise<CandidateProfile[]> {
-    // This would need a new API endpoint
-    // For now, return empty array as this method might not be used
-    return [];
+  getAllCandidateProfiles(limit = 100): CandidateProfile[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM candidate_profiles 
+      ORDER BY createdAt DESC 
+      LIMIT ?
+    `);
+    return stmt.all(limit) as CandidateProfile[];
   }
 
   // Методы для работы с базой знаний
-  async addKnowledgeItem(item: Omit<KnowledgeBaseItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<KnowledgeBaseItem> {
-    // This would need API implementation
-    throw new Error('Knowledge base API not implemented yet');
+  addKnowledgeItem(item: Omit<KnowledgeBaseItem, 'id' | 'createdAt' | 'updatedAt'>): KnowledgeBaseItem {
+    const id = this.generateId();
+    const now = Date.now();
+    const newItem: KnowledgeBaseItem = {
+      id,
+      ...item,
+      createdAt: now,
+      updatedAt: now
+    };
+    
+    const stmt = this.db.prepare(`
+      INSERT INTO knowledge_base (id, category, question, keywords, difficulty, competency, createdAt, updatedAt, isActive)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      newItem.id,
+      newItem.category,
+      newItem.question,
+      newItem.keywords,
+      newItem.difficulty,
+      newItem.competency,
+      newItem.createdAt,
+      newItem.updatedAt,
+      newItem.isActive ? 1 : 0
+    );
+    
+    return newItem;
   }
 
-  async getKnowledgeItems(category?: string, difficulty?: string): Promise<KnowledgeBaseItem[]> {
-    // This would need API implementation
-    return [];
+  getKnowledgeItems(category?: string, difficulty?: string): KnowledgeBaseItem[] {
+    let query = 'SELECT * FROM knowledge_base WHERE isActive = 1';
+    const params: any[] = [];
+    
+    if (category) {
+      query += ' AND category = ?';
+      params.push(category);
+    }
+    
+    if (difficulty) {
+      query += ' AND difficulty = ?';
+      params.push(difficulty);
+    }
+    
+    query += ' ORDER BY createdAt DESC';
+    
+    const stmt = this.db.prepare(query);
+    return stmt.all(...params) as KnowledgeBaseItem[];
   }
 
   // Аналитические методы
-  async getChatStatistics(userId?: string): Promise<ChatStatistics> {
-    const url = userId
-      ? `${this.apiBase}/statistics?userId=${encodeURIComponent(userId)}`
-      : `${this.apiBase}/statistics`;
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`Failed to get statistics: ${response.statusText}`);
+  getChatStatistics(userId?: string): {
+    totalSessions: number;
+    totalMessages: number;
+    averageSessionDuration: number;
+    completedProfiles: number;
+  } {
+    let sessionsQuery = 'SELECT COUNT(*) as count, AVG(endTime - startTime) as avgDuration FROM chat_sessions WHERE endTime IS NOT NULL';
+    let messagesQuery = 'SELECT COUNT(*) as count FROM chat_messages';
+    let profilesQuery = 'SELECT COUNT(*) as count FROM candidate_profiles';
+    
+    const params: any[] = [];
+    
+    if (userId) {
+      sessionsQuery += ' AND userId = ?';
+      messagesQuery += ' WHERE sessionId IN (SELECT id FROM chat_sessions WHERE userId = ?)';
+      profilesQuery += ' WHERE userId = ?';
+      params.push(userId, userId, userId);
     }
-
-    return response.json();
+    
+    const sessionsStmt = this.db.prepare(sessionsQuery);
+    const messagesStmt = this.db.prepare(messagesQuery);
+    const profilesStmt = this.db.prepare(profilesQuery);
+    
+    const sessionsResult = sessionsStmt.get(...(userId ? [userId] : [])) as any;
+    const messagesResult = messagesStmt.get(...(userId ? [userId] : [])) as any;
+    const profilesResult = profilesStmt.get(...(userId ? [userId] : [])) as any;
+    
+    return {
+      totalSessions: sessionsResult.count || 0,
+      totalMessages: messagesResult.count || 0,
+      averageSessionDuration: sessionsResult.avgDuration || 0,
+      completedProfiles: profilesResult.count || 0
+    };
   }
 
   // Утилитарные методы
@@ -230,14 +421,18 @@ export class ChatDatabase {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
   }
 
-  // Закрытие базы данных (не нужно в клиентской версии)
+  // Закрытие базы данных
   close(): void {
-    // No-op in client version
+    this.db.close();
   }
 
-  // Очистка старых данных (не нужно в клиентской версии)
+  // Очистка старых данных
   cleanupOldData(daysToKeep = 90): void {
-    // No-op in client version
+    const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
+    
+    // Удаляем старые сессии и связанные данные
+    const stmt = this.db.prepare('DELETE FROM chat_sessions WHERE startTime < ?');
+    stmt.run(cutoffTime);
   }
 }
 

@@ -4,18 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Award,
-  TrendingUp,
-  Target,
-  Lightbulb,
+import { 
+  Award, 
+  TrendingUp, 
+  Target, 
+  Lightbulb, 
   ArrowLeft,
   Star,
   CheckCircle,
   Circle,
-  Info,
-  Plus,
-  Minus
+  Info
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { AppUser } from '@/types/profile';
@@ -40,195 +38,31 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'detailed' | 'development'>('overview');
   const [userCompetencies, setUserCompetencies] = useState<UserCompetencyData[]>([]);
   const [selectedCompetency, setSelectedCompetency] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
 
-
-
-    // Загрузка данных о компетенциях пользователя
+  // Загрузка данных о компетенциях пользователя
   useEffect(() => {
     try {
-      // Сначала попробуем загрузить из сохраненных данных компетенций (из HR чатов)
-      const savedCompetencyData = localStorage.getItem(`competency-data-${user.email}`);
-      console.log('Загрузка компетенций для пользователя:', user.email);
-      console.log('Найденные данные в localStorage:', savedCompetencyData ? 'да' : 'нет');
-
-      if (savedCompetencyData) {
-        const competencies: UserCompetencyData[] = JSON.parse(savedCompetencyData);
-
-        // Проверяем, не являются ли все оценки максимальными (что указывает на демо-данные)
-        const allMaxScores = competencies.every(comp => comp.currentValue === 5.0);
-        console.log('Все оценки максимальные:', allMaxScores);
-
-        if (allMaxScores) {
-          console.log('Найдены демо-данные с максимальными оценками, сбрасываем для нового пользователя');
-          resetCompetenciesForNewUser();
-          return;
-        }
-
-        // Убеждаемся, что все компетенции существуют в стандарте и парсим даты
-        const validCompetencies = competencies
-          .filter(comp => STANDARD_COMPETENCIES[comp.competencyId])
-          .map(comp => ({
-            ...comp,
-            lastAssessed: comp.lastAssessed ? new Date(comp.lastAssessed) : new Date()
-          }));
-        setUserCompetencies(validCompetencies);
-        return;
-      }
-
-      // Если нет сохраненных данных, попробуем загрузить из hr-employees
+      // Получаем данные из employees
       const raw = localStorage.getItem('hr-employees');
       const employees: Employee[] = raw ? JSON.parse(raw) : [];
       const currentEmployee = employees.find(emp => emp.email === user.email);
-
+      
       if (currentEmployee && currentEmployee.ratings) {
-        console.log('Найдены данные сотрудника в hr-employees:', currentEmployee.ratings);
-
-        // Проверяем, не являются ли все оценки максимальными (демо-данные)
-        const ratingsValues = Object.values(currentEmployee.ratings);
-        const allMaxScores = ratingsValues.every(value => {
-          const numValue = typeof value === 'number' ? value : parseFloat(String(value));
-          return numValue === 5.0;
-        });
-        console.log('Все оценки в hr-employees максимальные:', allMaxScores);
-
-        if (allMaxScores) {
-          console.log('Найдены демо-данные в hr-employees, сбрасываем для нового пользователя');
-          resetCompetenciesForNewUser();
-          return;
-        }
-
-        const competencies: UserCompetencyData[] = Object.entries(currentEmployee.ratings).map(([key, value]) => {
-          // Конвертируем дробные значения в целые числа
-          const currentValue = Math.round(typeof value === 'number' ? value : parseFloat(String(value)) || 1);
-          const clampedValue = Math.max(0, Math.min(5, currentValue)); // Ограничиваем диапазон 0-5
-
-          // Проверяем, существует ли компетенция в стандарте
-          if (!STANDARD_COMPETENCIES[key]) {
-            console.warn(`Competency ${key} not found in STANDARD_COMPETENCIES, skipping`);
-            return null;
-          }
-
-          return {
-            competencyId: key,
-            currentValue: clampedValue,
-            targetValue: Math.min(5, clampedValue + 1), // Целевое значение - на балл выше
-            category: STANDARD_COMPETENCIES[key].category,
-            lastAssessed: new Date(), // В реальной системе это была бы дата последней оценки
-            improvementPlan: generateImprovementPlan(key, clampedValue)
-          };
-        }).filter(comp => comp !== null) as UserCompetencyData[];
-
+        const competencies: UserCompetencyData[] = Object.entries(currentEmployee.ratings).map(([key, value]) => ({
+          competencyId: key,
+          currentValue: value,
+          targetValue: Math.min(5, value + 1), // Целевое значение - на балл выше
+          category: STANDARD_COMPETENCIES[key]?.category || 'soft',
+          lastAssessed: new Date(), // В реальной системе это была бы дата последней оценки
+          improvementPlan: generateImprovementPlan(key, value)
+        }));
+        
         setUserCompetencies(competencies);
-      } else {
-        // Если нет данных вообще, создадим начальные оценки компетенций
-        console.log('Создание начальных оценок компетенций для нового пользователя');
-        const initialCompetencies: UserCompetencyData[] = [
-          {
-            competencyId: 'communication',
-            currentValue: 2.5,
-            targetValue: 4,
-            category: 'soft',
-            lastAssessed: new Date(),
-            improvementPlan: generateImprovementPlan('communication', 2.5)
-          },
-          {
-            competencyId: 'leadership',
-            currentValue: 2.5,
-            targetValue: 4,
-            category: 'leadership',
-            lastAssessed: new Date(),
-            improvementPlan: generateImprovementPlan('leadership', 2.5)
-          },
-          {
-            competencyId: 'productivity',
-            currentValue: 2.5,
-            targetValue: 4,
-            category: 'soft',
-            lastAssessed: new Date(),
-            improvementPlan: generateImprovementPlan('productivity', 2.5)
-          },
-          {
-            competencyId: 'reliability',
-            currentValue: 2.5,
-            targetValue: 4,
-            category: 'soft',
-            lastAssessed: new Date(),
-            improvementPlan: generateImprovementPlan('reliability', 2.5)
-          },
-          {
-            competencyId: 'initiative',
-            currentValue: 2.5,
-            targetValue: 4,
-            category: 'soft',
-            lastAssessed: new Date(),
-            improvementPlan: generateImprovementPlan('initiative', 2.5)
-          }
-        ];
-
-        setUserCompetencies(initialCompetencies);
       }
     } catch (error) {
       console.error('Error loading competency data:', error);
-
-      // Fallback: начальные оценки при ошибке
-      console.log('Fallback: создание начальных оценок при ошибке');
-      const initialCompetencies: UserCompetencyData[] = [
-        {
-          competencyId: 'communication',
-          currentValue: 0,
-          targetValue: 3,
-          category: 'soft',
-          lastAssessed: new Date(),
-          improvementPlan: generateImprovementPlan('communication', 0)
-        },
-        {
-          competencyId: 'leadership',
-          currentValue: 0,
-          targetValue: 3,
-          category: 'leadership',
-          lastAssessed: new Date(),
-          improvementPlan: generateImprovementPlan('leadership', 0)
-        },
-        {
-          competencyId: 'productivity',
-          currentValue: 0,
-          targetValue: 3,
-          category: 'soft',
-          lastAssessed: new Date(),
-          improvementPlan: generateImprovementPlan('productivity', 0)
-        },
-        {
-          competencyId: 'reliability',
-          currentValue: 0,
-          targetValue: 3,
-          category: 'soft',
-          lastAssessed: new Date(),
-          improvementPlan: generateImprovementPlan('reliability', 0)
-        },
-        {
-          competencyId: 'initiative',
-          currentValue: 0,
-          targetValue: 3,
-          category: 'soft',
-          lastAssessed: new Date(),
-          improvementPlan: generateImprovementPlan('initiative', 0)
-        }
-      ];
-      setUserCompetencies(initialCompetencies);
     }
   }, [user.email]);
-
-  // Сохраняем данные компетенций в localStorage при изменении
-  useEffect(() => {
-    if (userCompetencies.length > 0) {
-      try {
-        localStorage.setItem(`competency-data-${user.email}`, JSON.stringify(userCompetencies));
-      } catch (error) {
-        console.error('Error saving competency data:', error);
-      }
-    }
-  }, [userCompetencies, user.email]);
 
   // Генерация плана развития на основе текущего уровня
   const generateImprovementPlan = (competencyId: string, currentValue: number): string[] => {
@@ -236,9 +70,8 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
     if (!competency) return [];
 
     const currentLevel = competency.values[currentValue];
-    if (!currentLevel) return [];
-
     const nextLevel = competency.values[Math.min(5, currentValue + 1)];
+    
     if (!nextLevel) return [];
 
     // Базовые рекомендации на основе компетенции
@@ -278,49 +111,19 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
     return plans[competencyId] || ['Продолжать развиваться в данной области'];
   };
 
-  // Функция для обновления оценки компетенции
-  const updateCompetencyValue = (competencyId: string, newValue: number) => {
-    // Конвертируем в целое число и ограничиваем диапазон
-    const clampedValue = Math.max(0, Math.min(5, Math.round(newValue)));
-
-    // Проверяем, существует ли компетенция
-    if (!STANDARD_COMPETENCIES[competencyId]) {
-      console.error(`Competency ${competencyId} not found in STANDARD_COMPETENCIES`);
-      return;
-    }
-
-    // Проверяем, существует ли уровень компетенции
-    if (!STANDARD_COMPETENCIES[competencyId].values[clampedValue]) {
-      console.error(`Level ${clampedValue} not found for competency ${competencyId}`);
-      return;
-    }
-
-    setUserCompetencies(prev => prev.map(comp =>
-      comp.competencyId === competencyId
-        ? {
-            ...comp,
-            currentValue: clampedValue,
-            lastAssessed: new Date(),
-            improvementPlan: generateImprovementPlan(competencyId, clampedValue)
-          }
-        : comp
-    ));
-  };
-
   const getCompetencyColor = (value: number) => {
-    if (value >= 4) return 'text-green-600 bg-green-100 border-green-200';
-    if (value >= 3) return 'text-blue-600 bg-blue-100 border-blue-200';
-    if (value >= 2) return 'text-yellow-600 bg-yellow-100 border-yellow-200';
-    if (value >= 1) return 'text-orange-600 bg-orange-100 border-orange-200';
-    return 'text-gray-600 bg-gray-100 border-gray-200';
+    if (value >= 4.5) return 'text-green-600 bg-green-100 border-green-200';
+    if (value >= 3.5) return 'text-blue-600 bg-blue-100 border-blue-200';
+    if (value >= 2.5) return 'text-yellow-600 bg-yellow-100 border-yellow-200';
+    return 'text-red-600 bg-red-100 border-red-200';
   };
 
   const getCompetencyLevel = (value: number) => {
-    if (value >= 4) return 'Экспертный';
-    if (value >= 3) return 'Продвинутый';
-    if (value >= 2) return 'Компетентный';
-    if (value >= 1) return 'Начальный';
-    return 'Не оценено';
+    if (value >= 4.5) return 'Экспертный';
+    if (value >= 3.5) return 'Продвинутый';
+    if (value >= 2.5) return 'Компетентный';
+    if (value >= 1.5) return 'Базовый';
+    return 'Начальный';
   };
 
   const getCategoryIcon = (category: string) => {
@@ -350,24 +153,9 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
             <div>
               <h1 className="text-3xl font-bold text-white">Мои компетенции</h1>
               <p className="text-gray-400 text-sm">Профиль развития и достижений</p>
-              {overallScore === 0 && (
-                <div className="mt-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                  <p className="text-blue-300 text-xs">
-                    💬 <strong>Начните общение с ИИ</strong> - ваши компетенции будут оцениваться автоматически на основе диалогов
-                  </p>
-                </div>
-              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              onClick={() => setIsEditing(!isEditing)}
-              variant="outline"
-              size="sm"
-              className="bg-white/5 border-white/10 text-white hover:bg-white/10 mr-2"
-            >
-              {isEditing ? 'Завершить' : 'Редактировать'}
-            </Button>
             <Badge className={getCompetencyColor(overallScore)}>
               <Award className="h-4 w-4 mr-1" />
               {overallScore.toFixed(1)} / 5.0
@@ -477,21 +265,8 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
             <div className="grid gap-6">
               {userCompetencies.map((comp) => {
                 const competency = STANDARD_COMPETENCIES[comp.competencyId];
-
-                // Проверяем, существует ли компетенция
-                if (!competency) {
-                  console.warn(`Competency ${comp.competencyId} not found in STANDARD_COMPETENCIES`);
-                  return null;
-                }
-
                 const currentLevel = competency.values[comp.currentValue];
-
-                // Проверяем, существует ли уровень компетенции
-                if (!currentLevel) {
-                  console.warn(`Level ${comp.currentValue} not found for competency ${comp.competencyId}`);
-                  return null;
-                }
-
+                
                 return (
                   <Card key={comp.competencyId} className="bg-white/5 border-white/10 text-white">
                     <CardHeader>
@@ -567,29 +342,6 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
                               {comp.currentValue} балл
                             </Badge>
                             <span className="font-medium">{currentLevel.title}</span>
-                            <div className="text-xs text-gray-400 mt-1">
-                              Последняя оценка: {comp.lastAssessed ? new Date(comp.lastAssessed).toLocaleDateString('ru-RU') : 'Неизвестно'}
-                            </div>
-                            {isEditing && (
-                              <div className="flex items-center gap-1 ml-2">
-                                <Button
-                                  onClick={() => updateCompetencyValue(comp.competencyId, Math.max(0, comp.currentValue - 0.5))}
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-6 w-6 p-0 bg-white/5 border-white/10 text-white hover:bg-white/10"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  onClick={() => updateCompetencyValue(comp.competencyId, Math.min(5, comp.currentValue + 0.5))}
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-6 w-6 p-0 bg-white/5 border-white/10 text-white hover:bg-white/10"
-                                >
-                                  <Plus className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            )}
                           </div>
                           <p className="text-sm text-gray-300 mb-3">{currentLevel.description}</p>
                           
@@ -625,7 +377,7 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
                     </CardContent>
                   </Card>
                 );
-              }).filter(Boolean)}
+              })}
             </div>
           </TabsContent>
 
