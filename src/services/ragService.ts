@@ -1,4 +1,5 @@
 import { API_CONFIG } from '../config/api';
+import BehaviorAnalysisService, { BehaviorAnalysis, ConversationAnalysis } from './behaviorAnalysisService';
 
 interface KnowledgeItem {
   id: string;
@@ -43,9 +44,11 @@ class RAGService {
   private knowledgeBase: KnowledgeItem[] = [];
   private conversationHistory: ChatMessage[] = [];
   private currentProfile: CandidateProfile = this.initializeProfile();
+  private behaviorAnalysisService: BehaviorAnalysisService;
 
   constructor() {
     this.loadKnowledgeBase();
+    this.behaviorAnalysisService = new BehaviorAnalysisService();
   }
 
   // Инициализация профиля кандидата
@@ -156,7 +159,7 @@ ${knowledgeContext}
 ${this.conversationHistory.slice(-5).map(msg => `${msg.role}: ${msg.content}`).join('\n')}
 
 Поведенческий анализ последнего ответа:
-${this.analyzeUserBehavior(userMessage)}`;
+${await this.analyzeUserBehavior(userMessage)}`;
 
       const response = await this.callOpenAI([
         { role: 'system', content: systemPrompt },
@@ -177,42 +180,70 @@ ${this.analyzeUserBehavior(userMessage)}`;
     }
   }
 
-  // Анализ поведения пользователя
-  private analyzeUserBehavior(message: string): string {
-    const lowerMessage = message.toLowerCase().trim();
+  // Анализ поведения пользователя (новый ИИ-анализ)
+  private async analyzeUserBehavior(message: string): Promise<string> {
+    try {
+      const analysis = await this.behaviorAnalysisService.analyzeMessageBehavior(message, 'HR собеседование');
 
-    // Анализ на грубость и негатив
-    const rudeWords = ['дурак', 'идиот', 'тупой', 'козел', 'сука', 'блядь', 'пизд', 'хуй', 'ебан', 'охуе', 'отъебись'];
-    const negativePhrases = ['отстань', 'валите', 'пошел', 'убирайся', 'заткнись', 'молчать', 'заткни'];
-    const dismissiveWords = ['ничего', 'нет', 'не знаю', 'не помню', 'не хочу', 'не буду'];
+      const behaviorAnalysis = [];
+
+      // Основной эмоциональный тон
+      behaviorAnalysis.push(`${analysis.sentiment.toUpperCase()}: ${analysis.emotionalState}`);
+
+      // Уверенность в ответе
+      behaviorAnalysis.push(`УВЕРЕННОСТЬ: ${analysis.confidence}%`);
+
+      // Поведенческие маркеры
+      if (analysis.behavioralMarkers.length > 0) {
+        behaviorAnalysis.push(`МАРКЕРЫ: ${analysis.behavioralMarkers.join(', ')}`);
+      }
+
+      // Стиль коммуникации
+      behaviorAnalysis.push(`СТИЛЬ: ${analysis.communicationStyle}`);
+
+      // Уровень мотивации
+      behaviorAnalysis.push(`МОТИВАЦИЯ: ${analysis.motivationLevel.toUpperCase()}`);
+
+      // Проблемы и сильные стороны
+      if (analysis.concerns.length > 0) {
+        behaviorAnalysis.push(`ПРОБЛЕМЫ: ${analysis.concerns.join(', ')}`);
+      }
+
+      if (analysis.strengths.length > 0) {
+        behaviorAnalysis.push(`СИЛЬНЫЕ СТОРОНЫ: ${analysis.strengths.join(', ')}`);
+      }
+
+      return behaviorAnalysis.join('; ');
+    } catch (error) {
+      console.error('Error in AI behavior analysis:', error);
+      // Fallback к старому методу
+      return this.fallbackBehaviorAnalysis(message);
+    }
+  }
+
+  // Fallback анализ поведения (старый метод)
+  private fallbackBehaviorAnalysis(message: string): string {
+    const lowerMessage = message.toLowerCase().trim();
+    const rudeWords = ['дурак', 'идиот', 'тупой', 'козел', 'сука', 'блядь', 'пизд', 'хуй', 'ебан', 'охуе'];
+    const negativePhrases = ['отстань', 'валите', 'пошел', 'убирайся', 'заткнись'];
+    const dismissiveWords = ['ничего', 'нет', 'не знаю', 'не помню'];
 
     let behaviorAnalysis = [];
 
-    // Проверка на грубость
-    const hasRudeWords = rudeWords.some(word => lowerMessage.includes(word));
-    if (hasRudeWords) {
+    if (rudeWords.some(word => lowerMessage.includes(word))) {
       behaviorAnalysis.push('ГРУБОСТЬ: Использованы оскорбительные выражения');
     }
 
-    // Проверка на негатив
-    const hasNegativePhrases = negativePhrases.some(phrase => lowerMessage.includes(phrase));
-    if (hasNegativePhrases) {
-      behaviorAnalysis.push('НЕГАТИВ: Агрессивное или отталкивающее поведение');
+    if (negativePhrases.some(phrase => lowerMessage.includes(phrase))) {
+      behaviorAnalysis.push('НЕГАТИВ: Агрессивное поведение');
     }
 
-    // Проверка на односложные ответы
     if (lowerMessage.split(' ').length <= 3 && dismissiveWords.some(word => lowerMessage.includes(word))) {
-      behaviorAnalysis.push('НЕМОТИВИРОВАННОСТЬ: Односложные или уклончивые ответы');
+      behaviorAnalysis.push('НЕМОТИВИРОВАННОСТЬ: Односложные ответы');
     }
 
-    // Проверка на длину ответа
     if (lowerMessage.length < 10) {
-      behaviorAnalysis.push('КРАТКОСТЬ: Очень короткий ответ, недостаточно информации');
-    }
-
-    // Анализ эмоционального тона
-    if (lowerMessage.includes('!') && hasRudeWords) {
-      behaviorAnalysis.push('АГРЕССИЯ: Повышенная эмоциональность с негативным подтекстом');
+      behaviorAnalysis.push('КРАТКОСТЬ: Недостаточно информации');
     }
 
     if (behaviorAnalysis.length === 0) {
@@ -222,8 +253,60 @@ ${this.analyzeUserBehavior(userMessage)}`;
     return behaviorAnalysis.join('; ');
   }
 
-  // Анализ поведения за всю беседу
-  private analyzeConversationBehavior(): string {
+  // Анализ поведения за всю беседу (новый ИИ-анализ)
+  private async analyzeConversationBehavior(): Promise<string> {
+    try {
+      const analysis = await this.behaviorAnalysisService.analyzeConversationBehavior(this.conversationHistory);
+
+      const analysisParts = [];
+
+      // Общий эмоциональный тон
+      analysisParts.push(`${analysis.overallSentiment.toUpperCase()}: ${analysis.averageConfidence}% уверенности`);
+
+      // Поведенческие паттерны
+      if (analysis.behavioralPatterns.length > 0) {
+        analysisParts.push(`ПАТТЕРНЫ: ${analysis.behavioralPatterns.join(', ')}`);
+      }
+
+      // Эмоциональные тренды
+      if (analysis.emotionalTrends.length > 0) {
+        analysisParts.push(`ЭМОЦИИ: ${analysis.emotionalTrends.join(', ')}`);
+      }
+
+      // Оценка мотивации
+      analysisParts.push(`МОТИВАЦИЯ: ${analysis.motivationAssessment}`);
+
+      // Качество коммуникации
+      analysisParts.push(`КОММУНИКАЦИЯ: ${analysis.communicationQuality}`);
+
+      // Красные флаги
+      if (analysis.redFlags.length > 0) {
+        analysisParts.push(`ПРОБЛЕМЫ: ${analysis.redFlags.join(', ')}`);
+      }
+
+      // Положительные индикаторы
+      if (analysis.positiveIndicators.length > 0) {
+        analysisParts.push(`СИЛЬНЫЕ СТОРОНЫ: ${analysis.positiveIndicators.join(', ')}`);
+      }
+
+      // Области развития
+      if (analysis.developmentAreas.length > 0) {
+        analysisParts.push(`РАЗВИТИЕ: ${analysis.developmentAreas.join(', ')}`);
+      }
+
+      // Рекомендация по найму
+      analysisParts.push(`РЕКОМЕНДАЦИЯ: ${analysis.hiringRecommendation}`);
+
+      return analysisParts.join('; ');
+    } catch (error) {
+      console.error('Error in AI conversation behavior analysis:', error);
+      // Fallback к старому методу
+      return this.fallbackConversationAnalysis();
+    }
+  }
+
+  // Fallback анализ беседы (старый метод)
+  private fallbackConversationAnalysis(): string {
     const userMessages = this.conversationHistory.filter(msg => msg.role === 'user');
     const totalMessages = userMessages.length;
 
@@ -236,68 +319,48 @@ ${this.analyzeUserBehavior(userMessage)}`;
     let totalWords = 0;
 
     const rudeWords = ['дурак', 'идиот', 'тупой', 'козел', 'сука', 'блядь', 'пизд', 'хуй', 'ебан', 'охуе'];
-    const negativePhrases = ['отстань', 'валите', 'пошел', 'убирайся', 'заткнись', 'молчать'];
-    const dismissiveWords = ['ничего', 'нет', 'не знаю', 'не помню', 'не хочу', 'не буду'];
+    const negativePhrases = ['отстань', 'валите', 'пошел', 'убирайся', 'заткнись'];
+    const dismissiveWords = ['ничего', 'нет', 'не знаю', 'не помню'];
 
     userMessages.forEach(msg => {
       const text = msg.content.toLowerCase();
       totalWords += text.split(' ').length;
 
-      // Проверка на грубость
-      if (rudeWords.some(word => text.includes(word))) {
-        rudeCount++;
-      }
-
-      // Проверка на негатив
-      if (negativePhrases.some(phrase => text.includes(phrase))) {
-        negativeCount++;
-      }
-
-      // Проверка на односложные ответы
-      if (text.split(' ').length <= 3 && dismissiveWords.some(word => text.includes(word))) {
-        dismissiveCount++;
-      }
-
-      // Проверка на короткие ответы
-      if (text.length < 10) {
-        shortAnswersCount++;
-      }
+      if (rudeWords.some(word => text.includes(word))) rudeCount++;
+      if (negativePhrases.some(phrase => text.includes(phrase))) negativeCount++;
+      if (text.split(' ').length <= 3 && dismissiveWords.some(word => text.includes(word))) dismissiveCount++;
+      if (text.length < 10) shortAnswersCount++;
     });
 
     const avgWordsPerMessage = totalWords / totalMessages;
     const rudePercentage = (rudeCount / totalMessages) * 100;
     const negativePercentage = (negativeCount / totalMessages) * 100;
     const dismissivePercentage = (dismissiveCount / totalMessages) * 100;
-    const shortAnswersPercentage = (shortAnswersCount / totalMessages) * 100;
 
     let analysis = [];
 
     if (rudePercentage > 20) {
-      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${rudePercentage.toFixed(0)}% сообщений содержат грубость или оскорбления`);
+      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${rudePercentage.toFixed(0)}% сообщений содержат грубость`);
     } else if (rudeCount > 0) {
       analysis.push(`ПРОБЛЕМА: ${rudeCount} сообщение(й) содержат грубость`);
     }
 
     if (negativePercentage > 30) {
-      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${negativePercentage.toFixed(0)}% сообщений носят негативный или агрессивный характер`);
+      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${negativePercentage.toFixed(0)}% сообщений негативны`);
     } else if (negativeCount > 0) {
       analysis.push(`ПРОБЛЕМА: ${negativeCount} негативное(ых) сообщение(й)`);
     }
 
     if (dismissivePercentage > 40) {
-      analysis.push(`ПРОБЛЕМА: ${dismissivePercentage.toFixed(0)}% ответов односложные или уклончивые`);
+      analysis.push(`ПРОБЛЕМА: ${dismissivePercentage.toFixed(0)}% ответов односложные`);
     }
 
     if (avgWordsPerMessage < 5) {
-      analysis.push(`ПРОБЛЕМА: Средняя длина ответа ${avgWordsPerMessage.toFixed(1)} слов - недостаточно информации`);
-    }
-
-    if (shortAnswersPercentage > 50) {
-      analysis.push(`КРИТИЧНАЯ ПРОБЛЕМА: ${shortAnswersPercentage.toFixed(0)}% ответов очень короткие`);
+      analysis.push(`ПРОБЛЕМА: Средняя длина ответа ${avgWordsPerMessage.toFixed(1)} слов`);
     }
 
     if (analysis.length === 0) {
-      analysis.push('ПОВЕДЕНИЕ: Кандидат проявил нормальную коммуникацию и готовность к диалогу');
+      analysis.push('ПОВЕДЕНИЕ: Кандидат проявил нормальную коммуникацию');
     }
 
     return analysis.join('; ');
@@ -407,7 +470,7 @@ ${this.analyzeUserBehavior(userMessage)}`;
   async generateFinalProfile(): Promise<CandidateProfile> {
     try {
       // Анализ поведения из истории беседы
-      const behaviorAnalysis = this.analyzeConversationBehavior();
+      const behaviorAnalysis = await this.analyzeConversationBehavior();
 
       const profilePrompt = `На основе результатов собеседования создай развернутый профиль кандидата.
 УЧТИ ПОВЕДЕНЧЕСКИЙ АНАЛИЗ: ${behaviorAnalysis}
@@ -492,7 +555,7 @@ ${this.currentProfile.evaluations.map(evaluation =>
     return [...this.conversationHistory];
   }
 
-  // Автоматическая оценка в фоне (вызывается после каждого ответа)
+  // Автоматическая оценка ответа (вызывается после каждого ответа)
   async autoEvaluateLastResponse(): Promise<void> {
     if (this.conversationHistory.length < 2) return;
 
@@ -508,17 +571,19 @@ ${this.currentProfile.evaluations.map(evaluation =>
 
     // Находим релевантный вопрос из базы знаний
     const relevantQuestion = this.findRelevantQuestions(lastUserMessage.content)[0];
-    
+
     if (relevantQuestion) {
-      // Автоматически оцениваем ответ в фоне
-      setTimeout(() => {
-        this.evaluateResponse(
+      // Синхронно оцениваем ответ
+      try {
+        await this.evaluateResponse(
           relevantQuestion.question,
           lastUserMessage.content,
           relevantQuestion.answer,
           relevantQuestion.category
-        ).catch(console.error);
-      }, 1000);
+        );
+      } catch (error) {
+        console.error('Auto evaluation error:', error);
+      }
     }
   }
 }

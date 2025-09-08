@@ -15,12 +15,10 @@ import { RoleBadge } from "@/components/RoleBadge";
 import HRCallWidget from "./HRCallWidget";
 import { AvatarUpload } from "./AvatarUpload";
 import { PrivacySettings } from "./PrivacySettings";
-import { MBTIChatTest } from "./MBTIChatTest";
 
 interface UserProfileProps {
   user: AppUser;
   onLogout: () => void;
-  onStartChat?: () => void;
   onStartCompetency: () => void;
   onStartCall: () => void;
   onStartAIAssessment?: () => void;
@@ -32,15 +30,12 @@ interface UserProfileProps {
   onOpenCompetencyProfile?: () => void;
   onOpenManagerDashboard?: () => void;
   onOpenAnalyticsDashboard?: () => void;
-  onOpenAssessment360?: () => void;
-  onOpenMBTITest?: () => void;
-  onOpenMBTIChatTest?: () => void;
   onOpenOrgChart?: () => void;
   onOpenBulkInvitations?: () => void;
-  onOpenEnhancedAIInterview?: () => void;
+  onOpenUnifiedAIInterview?: () => void;
 }
 
-export function UserProfile({ user, onLogout, onStartChat, onStartCompetency, onStartCall, onStartAIAssessment, onStartSelfAssessment, onStartSubordinateAssessment, onOpenEmployees, onStartRAGInterview, onOpenHRSupervisor, onOpenCompetencyProfile, onOpenManagerDashboard, onOpenAnalyticsDashboard, onOpenAssessment360, onOpenMBTITest, onOpenMBTIChatTest, onOpenOrgChart, onOpenBulkInvitations, onOpenEnhancedAIInterview }: UserProfileProps) {
+export function UserProfile({ user, onLogout, onStartCompetency, onStartCall, onStartAIAssessment, onStartSelfAssessment, onStartSubordinateAssessment, onOpenEmployees, onStartRAGInterview, onOpenHRSupervisor, onOpenCompetencyProfile, onOpenManagerDashboard, onOpenAnalyticsDashboard, onOpenOrgChart, onOpenBulkInvitations, onOpenUnifiedAIInterview }: UserProfileProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedUser, setEditedUser] = useState(user);
   const [stats, setStats] = useState<{ totalSessions: number; todayTimeMins: number; lastVisit: string }>({
@@ -402,13 +397,6 @@ export function UserProfile({ user, onLogout, onStartChat, onStartCompetency, on
                 <p className="text-gray-400">Начните работу с HR ассистентом</p>
               </div>
               <div className="space-y-4">
-                {/* RAG Собеседование (чат-версия) - доступно всем */}
-                {onStartChat && (
-                  <Button onClick={onStartChat} className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 text-white shadow-xl hover:shadow-2xl transition-all duration-200 rounded-xl flex items-center justify-center gap-2">
-                    <Brain className="w-5 h-5" />
-                    HR-чат
-                  </Button>
-                )}
 
                 {/* RAG Собеседование (полная версия) - только для администраторов */}
                 {(user.role === 'administrator') && onStartRAGInterview && (
@@ -425,26 +413,15 @@ export function UserProfile({ user, onLogout, onStartChat, onStartCompetency, on
                   </Button>
                 )}
 
-                {/* MBTI Тест личности - доступно всем */}
-                {onOpenMBTIChatTest && (
-                  <Button onClick={onOpenMBTIChatTest} className="w-full h-14 text-lg font-medium bg-gradient-to-r from-purple-600/20 to-blue-600/20 border-purple-500/30 text-white hover:from-purple-600/30 hover:to-blue-600/30 rounded-xl">
-                    🤖 MBTI Чат-тест
+
+
+                {/* HR-интервью - доступно всем */}
+                {onOpenUnifiedAIInterview && (
+                  <Button onClick={onOpenUnifiedAIInterview} className="w-full h-14 text-lg font-medium bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-xl hover:shadow-2xl transition-all duration-200 rounded-xl">
+                    👔 HR-интервью
                   </Button>
                 )}
 
-                {/* 360° Оценка - доступно всем */}
-                {onOpenAssessment360 && (
-                  <Button onClick={onOpenAssessment360} className="w-full h-14 text-lg font-medium bg-white/5 border-white/10 text-white hover:bg-white/10 rounded-xl">
-                    🎯 360° Оценка с ИИ
-                  </Button>
-                )}
-
-                {/* Расширенное ИИ-интервью - доступно всем */}
-                {onOpenEnhancedAIInterview && (
-                  <Button onClick={onOpenEnhancedAIInterview} className="w-full h-14 text-lg font-medium bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white shadow-xl hover:shadow-2xl transition-all duration-200 rounded-xl">
-                    🤖 ИИ-Интервью для профиля
-                  </Button>
-                )}
 
                 {/* Дополнительные инструменты доступны руководителям и администраторам */}
                 {(user.role === 'manager' || user.role === 'director' || user.role === 'managing_director' || user.role === 'administrator') && (

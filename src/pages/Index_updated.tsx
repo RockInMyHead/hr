@@ -9,7 +9,7 @@ import { UserProfile } from "@/components/UserProfile";
 import HRChat from "@/components/HRChat";
 import RAGChatInterface from "@/components/RAGChatInterface";
 
-import AIAssessment from "@/components/AIAssessment";
+import { AIAssessmentDialog } from "@/components/AIAssessmentDialog";
 import { MANAGER_CHECKLIST, SELF_CHECKLIST, SUBORDINATE_CHECKLIST } from "@/constants/checklists";
 import Employees from "@/components/Employees";
 import { HRSupervisor } from "@/components/HRSupervisor";
@@ -238,12 +238,11 @@ const Index = () => {
 
   if (currentView === "ai-assessment" && user) {
     return (
-      <div className="min-h-screen bg-black text-white">
-        <AIAssessment
-          onBack={handleBackToProfile}
-          checklist={assessmentType === 'self' ? SELF_CHECKLIST : assessmentType === 'subordinate' ? SUBORDINATE_CHECKLIST : MANAGER_CHECKLIST}
-        />
-      </div>
+      <AIAssessmentDialog
+        user={user}
+        onBack={handleBackToProfile}
+        checklist={assessmentType === 'self' ? SELF_CHECKLIST : assessmentType === 'subordinate' ? SUBORDINATE_CHECKLIST : MANAGER_CHECKLIST}
+      />
     );
   }
 

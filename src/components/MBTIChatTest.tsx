@@ -23,7 +23,9 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import type { AppUser } from '@/types/profile';
-import type { MBTIProfile, MBTI_TYPES } from '@/types/extended-profile';
+import type { MBTIProfile } from '@/types/extended-profile';
+import { getMBTITypeDescription } from '@/types/extended-profile';
+import MBTIService from '@/services/mbtiService';
 
 interface MBTIChatTestProps {
   user: AppUser;
@@ -61,42 +63,6 @@ interface ChatSession {
   mbtiResult?: MBTIProfile;
 }
 
-// Система промптов для ChatGPT
-const MBTI_SYSTEM_PROMPTS = {
-  intro: `Вы - опытный психолог, специализирующийся на тестировании личности по методике MBTI.
-Ваш стиль: дружелюбный, профессиональный, эмпатичный.
-Цель: провести естественный разговор для определения типа личности.
-
-Начните с приветствия и объяснения, что мы будем беседовать о предпочтениях в работе и жизни.
-Спросите первый открытый вопрос о работе или хобби.`,
-  questioning: `Продолжайте разговор естественно. Задавайте уточняющие вопросы на основе ответов пользователя.
-Анализируйте каждую реплику на предмет признаков MBTI типов:
-
-Экстраверсия (E) vs Интроверсия (I):
-- E: любит общаться, черпает энергию от людей, предпочитает групповую работу
-- I: предпочитает уединение, работает лучше в одиночку, нуждается во времени для размышлений
-
-Сенсорика (S) vs Интуиция (N):
-- S: практичный, фокусируется на фактах, деталях, настоящем
-- N: творческий, видит возможности, будущее, абстрактные концепции
-
-Мышление (T) vs Чувства (F):
-- T: логичный, объективный, ценит справедливость
-- F: эмпатичный, ценит гармонию, учитывает чувства других
-
-Суждение (J) vs Восприятие (P):
-- J: организованный, планирует заранее, предпочитает структуру
-- P: гибкий, спонтанный, адаптируется к изменениям
-
-Задавайте вопросы, которые помогут выявить эти предпочтения. После 8-10 обменов репликами переходите к анализу.`,
-  analysis: `Проанализируйте всю беседу и определите тип MBTI. Учитывайте:
-- Количество указаний на каждый тип
-- Контекст ответов
-- Противоречия и нюансы
-
-Определите наиболее подходящий 4-буквенный тип и объясните почему.
-Дайте рекомендации по работе и развитию.`
-};
 
 export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
   const [session, setSession] = useState<ChatSession | null>(null);
@@ -104,6 +70,7 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
   const [isTyping, setIsTyping] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [mbtiService] = useState(() => new MBTIService());
 
   // Инициализация сессии
   useEffect(() => {
@@ -139,95 +106,10 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session?.messages]);
 
-  // Симуляция ответа ChatGPT
-  const simulateChatGPTResponse = async (userMessage: string, phase: number): Promise<string> => {
-    await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 2000));
-
-    const responses = {
-      1: `Спасибо за рассказ! ${userMessage.length > 50 ? 'Вы довольно подробно описали свои интересы.' : 'Интересные детали!'}
-
-Теперь давайте поговорим о работе. Расскажите, как вы обычно работаете над проектами - предпочитаете работать в команде или самостоятельно? Что вам больше нравится в рабочем процессе?`,
-
-      2: `Отличный ответ! Теперь я понимаю ваш подход к работе.
-
-Следующий вопрос: когда вам нужно принять важное решение, вы обычно:
-• Обсуждаете варианты с коллегами или друзьями?
-• Или предпочитаете сначала все обдумать самостоятельно?
-
-Расскажите о каком-то конкретном случае из вашей жизни.`,
-
-      3: `Спасибо, это очень показательный пример! 
-
-Давайте поговорим о вашем отношении к деталям. Вы больше любите:
-• Работа с конкретными фактами, инструкциями и проверенными методами?
-• Или предпочитаете творческий подход, поиск новых возможностей и идей?
-
-Приведите пример из вашей работы или учебы.`,
-
-      4: `Интересный подход! 
-
-А теперь вопрос о планировании: как вы относитесь к дедлайнам и планированию?
-• Вам комфортнее, когда все четко спланировано и структурировано?
-• Или вы предпочитаете гибкость и возможность адаптироваться к изменениям?
-
-Расскажите о вашем опыте.`,
-
-      5: `Понятно! Теперь давайте поговорим о том, как вы общаетесь с другими.
-
-В конфликтных ситуациях или при обсуждении сложных тем вы обычно:
-• Фокусируетесь на логике, фактах и объективных аргументах?
-• Или учитываете чувства других людей и стараетесь сохранить гармонию?
-
-Приведите пример.`,
-
-      6: `Отличный пример! Теперь последний блок вопросов.
-
-Как вы проводите свое свободное время после работы?
-• Предпочитаете активное общение с людьми, вечеринки, мероприятия?
-• Или отдыхаете в одиночестве, читаете, занимаетесь хобби наедине?
-
-Расскажите подробнее.`,
-
-      7: `Спасибо! Еще один вопрос: когда вы узнаете что-то новое, вам легче:
-• Осваивать практические навыки, работать с конкретными инструментами?
-• Или понимать теоретические концепции, видеть связи между идеями?
-
-Приведите пример из недавнего опыта.`,
-
-      8: `Прекрасно! Теперь у меня достаточно информации для анализа.
-
-Дайте мне минутку, чтобы проанализировать нашу беседу и определить ваш тип личности по MBTI...`,
-
-      9: `Анализ завершен! 
-
-На основе нашей беседы, я определил ваш тип личности:
-
-**ENFP - "Вдохновитель"**
-
-Почему этот тип?
-• Вы показали высокую экстраверсию в общении и работе с людьми
-• Ваши ответы демонстрируют развитую интуицию и интерес к возможностям
-• Вы цените чувства и гармонию в отношениях
-• Предпочитаете гибкость и адаптивность в работе
-
-Это предварительный анализ. Для более точного определения рекомендую пройти полный тест MBTI.`,
-
-      10: `Спасибо за интересную беседу! 
-
-Ваш тип ENFP говорит о том, что вы:
-• Творческий и вдохновляющий лидер
-• Любите работать с людьми и помогать им развиваться
-• Хорошо видите возможности и будущее
-• Цените гармонию в отношениях
-
-В работе вам подойдут роли, где можно:
-• Генерировать новые идеи
-• Вдохновлять команду
-• Работать с людьми
-• Иметь творческую свободу`
-    };
-
-    return responses[phase as keyof typeof responses] || responses[1];
+  // Получение ответа от MBTI сервиса
+  const getMBTIResponse = async (userMessage: string, currentPhase: string): Promise<string> => {
+    const phase = currentPhase as 'intro' | 'questioning' | 'analysis';
+    return await mbtiService.getChatResponse(userMessage, phase);
   };
 
   // Добавление сообщения от AI
@@ -267,8 +149,8 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
     setCurrentMessage('');
     setIsTyping(true);
 
-    // Получаем ответ от "ChatGPT"
-    const aiResponse = await simulateChatGPTResponse(currentMessage, session.currentPhase);
+    // Получаем ответ от MBTI сервиса
+    const aiResponse = await getMBTIResponse(currentMessage, session.status);
 
     setIsTyping(false);
 
@@ -284,12 +166,19 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
     setSession(prev => {
       if (!prev) return null;
 
-      const newPhase = prev.currentPhase < prev.totalPhases ? prev.currentPhase + 1 : prev.currentPhase;
-      const newStatus = newPhase >= prev.totalPhases ? 'analysis' : prev.status;
+      // Определяем новую фазу на основе количества сообщений
+      const userMessageCount = prev.messages.filter(m => m.role === 'user').length;
+      let newStatus = prev.status;
+
+      if (userMessageCount >= 6 && prev.status === 'questioning') {
+        newStatus = 'analysis';
+      } else if (prev.status === 'intro') {
+        newStatus = 'questioning';
+      }
 
       return {
         ...prev,
-        currentPhase: newPhase,
+        currentPhase: prev.currentPhase + 1,
         status: newStatus,
         messages: [...prev.messages, aiMessage]
       };
@@ -297,44 +186,55 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
   };
 
   // Завершение анализа
-  const completeAnalysis = () => {
+  const completeAnalysis = async () => {
     if (!session) return;
 
-    // Создаем профиль на основе анализа
-    const personalityScores = {
-      E: 65, I: 35,
-      S: 40, N: 60,
-      T: 45, F: 55,
-      J: 30, P: 70
-    };
+    setIsAnalyzing(true);
 
-    const mbtiType = 'ENFP' as keyof typeof MBTI_TYPES;
+    try {
+      // Получаем анализ от MBTI сервиса
+      const profile = await mbtiService.generateMBTIProfile();
 
-    const profile: MBTIProfile = {
-      type: mbtiType,
-      dimensions: {
-        extraversion: personalityScores.E,
-        sensing: personalityScores.S,
-        thinking: personalityScores.T,
-        judging: personalityScores.J
-      },
-      strengths: MBTI_TYPES[mbtiType]?.strengths || ['Творческий подход', 'Эмпатия', 'Генерация идей'],
-      developmentAreas: MBTI_TYPES[mbtiType]?.challenges || ['Организованность', 'Детализация', 'Дисциплина'],
-      workPreferences: ['Творческая работа', 'Работа с людьми', 'Гибкий график', 'Новые вызовы'],
-      communicationStyle: 'Вдохновляющий и эмпатичный',
-      teamRole: 'Генератор идей и мотиватор команды',
-      stressFactors: ['Рутина', 'Жесткие рамки', 'Отсутствие творчества'],
-      motivators: ['Творческая свобода', 'Взаимодействие с людьми', 'Новые возможности']
-    };
+      setSession(prev => prev ? {
+        ...prev,
+        status: 'completed',
+        mbtiResult: profile
+      } : null);
 
-    setSession(prev => prev ? {
-      ...prev,
-      status: 'completed',
-      mbtiResult: profile
-    } : null);
+      if (onComplete) {
+        onComplete(profile);
+      }
+    } catch (error) {
+      console.error('Error completing MBTI analysis:', error);
+      // Fallback к базовому профилю
+      const fallbackProfile: MBTIProfile = {
+        type: 'ENFP',
+        dimensions: {
+          extraversion: 65,
+          sensing: 40,
+          thinking: 45,
+          judging: 30
+        },
+        strengths: ['Творческий подход', 'Эмпатия', 'Генерация идей'],
+        developmentAreas: ['Организованность', 'Детализация', 'Дисциплина'],
+        workPreferences: ['Творческая работа', 'Работа с людьми', 'Гибкий график'],
+        communicationStyle: 'Вдохновляющий и эмпатичный',
+        teamRole: 'Генератор идей и мотиватор команды',
+        stressFactors: ['Рутина', 'Жесткие рамки', 'Отсутствие творчества'],
+        motivators: ['Творческая свобода', 'Взаимодействие с людьми', 'Новые возможности']
+      };
 
-    if (onComplete) {
-      onComplete(profile);
+      setSession(prev => prev ? {
+        ...prev,
+        status: 'completed',
+        mbtiResult: fallbackProfile
+      } : null);
+
+      if (onComplete) {
+        onComplete(fallbackProfile);
+      }
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -469,7 +369,7 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
         </Card>
 
         {/* Завершение анализа */}
-        {session.status === 'analysis' && !session.mbtiResult && (
+        {session.status === 'analysis' && !session.mbtiResult && !isAnalyzing && (
           <Card className="bg-white/5 border-white/10 text-white text-center">
             <CardContent className="p-8">
               <Sparkles className="h-16 w-16 text-purple-500 mx-auto mb-4" />
@@ -477,8 +377,12 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
               <p className="text-gray-400 mb-6">
                 На основе нашей беседы я определил ваш тип личности по методике MBTI.
               </p>
-              <Button onClick={completeAnalysis} className="bg-purple-600 hover:bg-purple-700">
-                Показать результаты
+              <Button
+                onClick={completeAnalysis}
+                disabled={isAnalyzing}
+                className="bg-purple-600 hover:bg-purple-700"
+              >
+                {isAnalyzing ? 'Анализируем...' : 'Показать результаты'}
               </Button>
             </CardContent>
           </Card>
@@ -497,10 +401,10 @@ export function MBTIChatTest({ user, onBack, onComplete }: MBTIChatTestProps) {
                 {session.mbtiResult.type}
               </div>
               <p className="text-xl text-gray-300">
-                {MBTI_TYPES[session.mbtiResult.type]?.name || 'Уникальная личность'}
+                {session.mbtiResult.type}
               </p>
               <p className="text-gray-400 mt-2">
-                {MBTI_TYPES[session.mbtiResult.type]?.description || 'Индивидуальная комбинация качеств'}
+                Персонализированное описание типа личности
               </p>
             </div>
 

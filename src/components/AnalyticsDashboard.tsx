@@ -24,8 +24,9 @@ import {
 } from 'lucide-react';
 import type { AppUser } from '@/types/profile';
 import type { Employee } from '@/types/employee';
-import { STANDARD_COMPETENCIES } from '@/types/competencies';
+import { getAllCompetencyDefinitions } from '@/types/competencies';
 import { exportToCSV, exportToExcel, exportToPDF, generateCompetencyReport, generateDepartmentSummary } from '@/utils/export';
+import AnalyticsService from '@/services/analyticsService';
 
 interface AnalyticsDashboardProps {
   user: AppUser;
@@ -81,23 +82,38 @@ export function AnalyticsDashboard({ user, onBack }: AnalyticsDashboardProps) {
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [competencies, setCompetencies] = useState<Record<string, any>>({});
+  const [analyticsService] = useState(() => new AnalyticsService());
+  const [generatedRecommendations, setGeneratedRecommendations] = useState<any>(null);
 
   // Загрузка и анализ данных
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('hr-employees');
-      const employeeData: Employee[] = raw ? JSON.parse(raw) : [];
-      setEmployees(employeeData);
+    const loadData = async () => {
+      try {
+        const raw = localStorage.getItem('hr-employees');
+        const employeeData: Employee[] = raw ? JSON.parse(raw) : [];
+        setEmployees(employeeData);
 
-      // Генерация аналитических данных
-      const analytics = generateAnalytics(employeeData);
-      setAnalyticsData(analytics);
-    } catch (error) {
-      console.error('Error loading analytics data:', error);
-    }
+        // Загрузка компетенций
+        const competencyDefinitions = await getAllCompetencyDefinitions();
+        setCompetencies(competencyDefinitions);
+
+        // Генерация аналитических данных
+        const analytics = await generateAnalytics(employeeData, competencyDefinitions);
+        setAnalyticsData(analytics);
+
+        // Сохраняем сгенерированные рекомендации
+        const recommendations = await analyticsService.generateAllRecommendations(analytics);
+        setGeneratedRecommendations(recommendations);
+      } catch (error) {
+        console.error('Error loading analytics data:', error);
+      }
+    };
+
+    loadData();
   }, [timeFilter, departmentFilter]);
 
-  const generateAnalytics = (employeeData: Employee[]): AnalyticsData => {
+  const generateAnalytics = async (employeeData: Employee[], competencyDefinitions: Record<string, any>): Promise<AnalyticsData> => {
     const employeesWithRatings = employeeData.filter(emp => emp.ratings);
     
     if (employeesWithRatings.length === 0) {
@@ -152,14 +168,14 @@ export function AnalyticsDashboard({ user, onBack }: AnalyticsDashboardProps) {
 
       // Анализ компетенций отдела
       const competencyAverages: Record<string, number> = {};
-      Object.keys(STANDARD_COMPETENCIES).forEach(comp => {
+      Object.keys(competencyDefinitions).forEach(comp => {
         const compScores = deptEmployees.map(emp => emp.ratings![comp as keyof typeof emp.ratings] || 0);
         competencyAverages[comp] = compScores.reduce((sum, score) => sum + score, 0) / compScores.length;
       });
 
       const sortedCompetencies = Object.entries(competencyAverages).sort(([,a], [,b]) => b - a);
-      const topCompetency = STANDARD_COMPETENCIES[sortedCompetencies[0]?.[0]]?.name || 'Нет данных';
-      const weakestCompetency = STANDARD_COMPETENCIES[sortedCompetencies[sortedCompetencies.length - 1]?.[0]]?.name || 'Нет данных';
+      const topCompetency = competencyDefinitions[sortedCompetencies[0]?.[0]]?.name || 'Нет данных';
+      const weakestCompetency = competencyDefinitions[sortedCompetencies[sortedCompetencies.length - 1]?.[0]]?.name || 'Нет данных';
 
       return {
         name: dept,
@@ -172,15 +188,15 @@ export function AnalyticsDashboard({ user, onBack }: AnalyticsDashboardProps) {
     });
 
     // Тренды компетенций
-    const competencyTrends: CompetencyTrend[] = Object.entries(STANDARD_COMPETENCIES).map(([compId, comp]) => {
+    const competencyTrends: CompetencyTrend[] = Object.entries(competencyDefinitions).map(([compId, comp]) => {
       const compScores = employeesWithRatings.map(emp => emp.ratings![compId as keyof typeof emp.ratings] || 0);
       const currentAverage = compScores.reduce((sum, score) => sum + score, 0) / compScores.length;
-      
+
       return {
         competency: comp.name,
         currentAverage,
         trend: currentAverage >= 3.5 ? 'up' : currentAverage < 2.5 ? 'down' : 'stable',
-        change: Math.random() * 0.4 - 0.2, // Симуляция изменения
+        change: Math.random() * 0.4 - 0.2, // Симуляция изменения (можно заменить на реальные данные)
         priority: currentAverage < 2.5 ? 'high' : currentAverage < 3.5 ? 'medium' : 'low'
       };
     });
@@ -222,12 +238,30 @@ export function AnalyticsDashboard({ user, onBack }: AnalyticsDashboardProps) {
       .filter(trend => trend.priority === 'high')
       .map(trend => trend.competency);
 
+    // Создаем временный объект analytics для генерации рекомендаций
+    const tempAnalytics: AnalyticsData = {
+      totalEmployees: employeeData.length,
+      averageScore,
+      topPerformers,
+      needsImprovement,
+      departmentStats,
+      competencyTrends,
+      performanceDistribution: [],
+      riskAnalysis: {
+        highRisk,
+        mediumRisk,
+        lowRisk,
+        criticalCompetencies,
+        recommendations: [] // Будет заполнено AI
+      }
+    };
+
+    // Генерируем рекомендации через AI
+    const generatedRecommendations = await analyticsService.generateAllRecommendations(tempAnalytics);
     const recommendations = [
-      ...(highRisk > 0 ? [`${highRisk} сотрудников нуждаются в срочном развитии`] : []),
-      ...(criticalCompetencies.length > 0 ? [`Критические компетенции: ${criticalCompetencies.join(', ')}`] : []),
-      ...(averageScore < 3 ? ['Общий уровень команды требует внимания'] : []),
-      'Рекомендуется проведение индивидуальных планов развития',
-      'Необходимо усилить программы обучения и ментринга'
+      ...generatedRecommendations.riskRecommendations,
+      ...generatedRecommendations.competencyRecommendations.slice(0, 2),
+      ...generatedRecommendations.priorityActions.slice(0, 1)
     ].slice(0, 5);
 
     return {
@@ -447,7 +481,7 @@ export function AnalyticsDashboard({ user, onBack }: AnalyticsDashboardProps) {
                 </div>
 
                 <div className="space-y-3">
-                  <h4 className="font-medium text-gray-300">Рекомендации:</h4>
+                  <h4 className="font-medium text-gray-300">Рекомендации по рискам:</h4>
                   <ul className="space-y-2">
                     {analyticsData.riskAnalysis.recommendations.map((rec, i) => (
                       <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
@@ -459,6 +493,91 @@ export function AnalyticsDashboard({ user, onBack }: AnalyticsDashboardProps) {
                 </div>
               </CardContent>
             </Card>
+
+            {/* AI Рекомендации */}
+            {generatedRecommendations && (
+              <>
+                {/* Рекомендации по отделам */}
+                <Card className="bg-white/5 border-white/10 text-white">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5 text-blue-500" />
+                      Рекомендации по отделам
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2">
+                      {generatedRecommendations.departmentRecommendations.map((rec: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
+                          <Target className="h-3 w-3 text-blue-500 mt-1 flex-shrink-0" />
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+
+                {/* Рекомендации по компетенциям */}
+                <Card className="bg-white/5 border-white/10 text-white">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Award className="h-5 w-5 text-green-500" />
+                      Рекомендации по компетенциям
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2">
+                      {generatedRecommendations.competencyRecommendations.map((rec: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
+                          <Award className="h-3 w-3 text-green-500 mt-1 flex-shrink-0" />
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+
+                {/* Стратегические рекомендации */}
+                <Card className="bg-white/5 border-white/10 text-white">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-purple-500" />
+                      Стратегические рекомендации
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2">
+                      {generatedRecommendations.generalRecommendations.map((rec: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
+                          <TrendingUp className="h-3 w-3 text-purple-500 mt-1 flex-shrink-0" />
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+
+                {/* Приоритетные действия */}
+                <Card className="bg-white/5 border-white/10 text-white">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Zap className="h-5 w-5 text-red-500" />
+                      Приоритетные действия
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-3">
+                      {generatedRecommendations.priorityActions.map((action: string, i: number) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-gray-300 bg-black/20 p-3 rounded-lg">
+                          <div className="text-red-400 font-bold mt-0.5">{action.split(':')[0]}</div>
+                          <div>{action.split(':').slice(1).join(':')}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </TabsContent>
 
           {/* Остальные вкладки */}

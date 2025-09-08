@@ -22,19 +22,7 @@ console.log('PORT:', PORT);
 console.log('OPENAI_API_KEY:', OPENAI_API_KEY ? '***' + OPENAI_API_KEY.slice(-4) : 'NOT SET');
 
 // CORS middleware
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://localhost:4173',
-    'http://talti.ru',
-    'https://talti.ru',
-    /^https?:\/\/.*\.talti\.ru$/
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors()); // Allow all origins (development only)
 
 // CORS logging middleware
 app.use((req, res, next) => {
@@ -44,26 +32,22 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '1mb' }));
 
-// Handle preflight requests
-app.options('/api/openai', (req, res) => {
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://localhost:4173',
-    'http://talti.ru',
-    'https://talti.ru'
-  ];
-
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin) || /^https?:\/\/.*\.talti\.ru$/.test(origin || '')) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-
-  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.status(200).end();
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    services: {
+      database: 'connected',
+      openai: process.env.OPENAI_API_KEY ? 'configured' : 'not_configured'
+    }
+  });
 });
+
+// Enable CORS for all preflight requests
+app.options('*', cors());
 
 // OpenAI proxy
 app.post('/api/openai', async (req, res) => {

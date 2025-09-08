@@ -24,7 +24,7 @@ import {
 import type { AppUser } from '@/types/profile';
 import type { Employee } from '@/types/employee';
 import type { Assessment360, ExtendedEmployeeProfile } from '@/types/extended-profile';
-import { STANDARD_COMPETENCIES } from '@/types/competencies';
+import { getAllCompetencyDefinitions } from '@/types/competencies';
 
 interface Assessment360Props {
   user: AppUser;
@@ -64,22 +64,35 @@ export function Assessment360({ user, onBack }: Assessment360Props) {
   const [assessorRole, setAssessorRole] = useState<'self' | 'manager' | 'peer' | 'subordinate'>('self');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [competencies, setCompetencies] = useState<Record<string, any>>({});
+  const [competenciesLoading, setCompetenciesLoading] = useState(true);
 
   // Загрузка данных
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('hr-employees');
-      const employeeData: Employee[] = raw ? JSON.parse(raw) : [];
-      setEmployees(employeeData);
+    const loadData = async () => {
+      try {
+        // Загрузка компетенций
+        const competencyDefinitions = await getAllCompetencyDefinitions();
+        setCompetencies(competencyDefinitions);
+        setCompetenciesLoading(false);
 
-      // Загрузка сохраненных сессий
-      const savedSessions = localStorage.getItem('assessment-360-sessions');
-      if (savedSessions) {
-        setSessions(JSON.parse(savedSessions));
+        // Загрузка сотрудников
+        const raw = localStorage.getItem('hr-employees');
+        const employeeData: Employee[] = raw ? JSON.parse(raw) : [];
+        setEmployees(employeeData);
+
+        // Загрузка сохраненных сессий
+        const savedSessions = localStorage.getItem('assessment-360-sessions');
+        if (savedSessions) {
+          setSessions(JSON.parse(savedSessions));
+        }
+      } catch (error) {
+        console.error('Error loading 360 assessment data:', error);
+        setCompetenciesLoading(false);
       }
-    } catch (error) {
-      console.error('Error loading 360 assessment data:', error);
-    }
+    };
+
+    loadData();
   }, []);
 
   // Сохранение сессий
@@ -197,15 +210,15 @@ export function Assessment360({ user, onBack }: Assessment360Props) {
   // Генерация ответа ИИ (имитация ChatGPT)
   const generateAIResponse = async (session: AssessmentSession, userMessage: ChatMessage): Promise<string> => {
     const messageCount = session.messages.filter(m => m.role === 'user').length;
-    const competencies = Object.keys(STANDARD_COMPETENCIES);
+    const competencies = Object.keys(competencies);
     const currentCompetency = competencies[Math.floor(messageCount / 3) % competencies.length];
     
     // Анализ контекста и генерация релевантного вопроса
     const responses = [
-      `Интересный пример! Расскажите подробнее о том, как вы подходили к решению этой задачи в области "${STANDARD_COMPETENCIES[currentCompetency]?.name}"?`,
+      `Интересный пример! Расскажите подробнее о том, как вы подходили к решению этой задачи в области "${competencies[currentCompetency]?.name}"?`,
       `Благодарю за ответ. Можете привести конкретный пример ситуации, где вы продемонстрировали эту компетенцию?`,
       `Понятно. А какие были основные вызовы в этой ситуации и как вы их преодолели?`,
-      `Отлично! Теперь давайте обсудим "${STANDARD_COMPETENCIES[currentCompetency]?.name}". Как вы оцениваете этот навык у себя/коллеги?`,
+      `Отлично! Теперь давайте обсудим "${competencies[currentCompetency]?.name}". Как вы оцениваете этот навык у себя/коллеги?`,
       `Интересно. Какие конкретные действия или поведение привели к такому результату?`,
       `Спасибо за детальный ответ. Что бы вы сделали по-другому в похожей ситуации?`,
       `Понимаю. Как окружающие обычно реагируют на такой подход к работе?`,
@@ -245,7 +258,7 @@ export function Assessment360({ user, onBack }: Assessment360Props) {
   // Генерация итоговых оценок
   const generateFinalScores = (session: AssessmentSession): Record<string, number> => {
     const scores: Record<string, number> = {};
-    const competencyKeys = Object.keys(STANDARD_COMPETENCIES);
+    const competencyKeys = Object.keys(competencies);
     
     competencyKeys.forEach(key => {
       // Имитация анализа ответов для генерации оценки

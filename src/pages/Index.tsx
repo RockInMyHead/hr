@@ -9,19 +9,16 @@ import { UserProfile } from "@/components/UserProfile";
 import HRChat from "@/components/HRChat";
 import RAGChatInterface from "@/components/RAGChatInterface";
 
-import AIAssessment from "@/components/AIAssessment";
+import { AIAssessmentDialog } from "@/components/AIAssessmentDialog";
 import { MANAGER_CHECKLIST, SELF_CHECKLIST, SUBORDINATE_CHECKLIST } from "@/constants/checklists";
 import Employees from "@/components/Employees";
 import { HRSupervisor } from "@/components/HRSupervisor";
 import { CompetencyProfile } from "@/components/CompetencyProfile";
 import { ManagerDashboard } from "@/components/ManagerDashboard";
 import { AnalyticsDashboard } from "@/components/AnalyticsDashboard";
-import { Assessment360 } from "@/components/Assessment360";
-import { MBTITest } from "@/components/MBTITest";
-import { MBTIChatTest } from "@/components/MBTIChatTest";
 import { InteractiveOrgChart } from "@/components/InteractiveOrgChart";
 import { BulkInvitationSystem } from "@/components/BulkInvitationSystem";
-import { EnhancedAIInterview } from "@/components/EnhancedAIInterview";
+import { UnifiedAIInterview } from "@/components/UnifiedAIInterview";
 import type { AppUser } from "@/types/profile";
 
 type User = AppUser;
@@ -29,7 +26,7 @@ type User = AppUser;
 const Index = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
-  const [currentView, setCurrentView] = useState<"auth" | "profile" | "chat" | "rag-chat" | "call" | "ai-assessment" | "employees" | "hr-supervisor" | "competency-profile" | "manager-dashboard" | "analytics-dashboard" | "assessment-360" | "mbti-test" | "mbti-chat-test" | "org-chart" | "bulk-invitations" | "enhanced-ai-interview">("auth");
+  const [currentView, setCurrentView] = useState<"auth" | "profile" | "chat" | "rag-chat" | "call" | "ai-assessment" | "employees" | "hr-supervisor" | "competency-profile" | "manager-dashboard" | "analytics-dashboard" | "org-chart" | "bulk-invitations" | "unified-ai-interview">("auth");
   const [assessmentType, setAssessmentType] = useState<'manager' | 'self' | 'subordinate' | null>(null);
 
   // Загрузка сохраненного пользователя при инициализации
@@ -142,20 +139,8 @@ const Index = () => {
     localStorage.setItem(STORAGE_KEYS.view, 'analytics-dashboard');
   };
 
-  const handleOpenAssessment360 = () => {
-    setCurrentView("assessment-360");
-    localStorage.setItem(STORAGE_KEYS.view, 'assessment-360');
-  };
 
-  const handleOpenMBTITest = () => {
-    setCurrentView("mbti-test");
-    localStorage.setItem(STORAGE_KEYS.view, 'mbti-test');
-  };
 
-  const handleOpenMBTIChatTest = () => {
-    setCurrentView("mbti-chat-test");
-    localStorage.setItem(STORAGE_KEYS.view, 'mbti-chat-test');
-  };
 
   const handleOpenOrgChart = () => {
     setCurrentView("org-chart");
@@ -167,9 +152,10 @@ const Index = () => {
     localStorage.setItem(STORAGE_KEYS.view, 'bulk-invitations');
   };
 
-  const handleOpenEnhancedAIInterview = () => {
-    setCurrentView("enhanced-ai-interview");
-    localStorage.setItem(STORAGE_KEYS.view, 'enhanced-ai-interview');
+
+  const handleOpenUnifiedAIInterview = () => {
+    setCurrentView("unified-ai-interview");
+    localStorage.setItem(STORAGE_KEYS.view, 'unified-ai-interview');
   };
 
   if (currentView === "auth") {
@@ -181,7 +167,6 @@ const Index = () => {
       <UserProfile
         user={user}
         onLogout={handleLogout}
-        onStartChat={handleStartChat}
         onStartCompetency={() => {}}
         onStartCall={handleStartCall}
         onStartAIAssessment={() => handleStartAIAssessment('manager')}
@@ -193,12 +178,9 @@ const Index = () => {
         onOpenCompetencyProfile={handleOpenCompetencyProfile}
         onOpenManagerDashboard={handleOpenManagerDashboard}
         onOpenAnalyticsDashboard={handleOpenAnalyticsDashboard}
-        onOpenAssessment360={handleOpenAssessment360}
-        onOpenMBTITest={handleOpenMBTITest}
-        onOpenMBTIChatTest={handleOpenMBTIChatTest}
         onOpenOrgChart={handleOpenOrgChart}
         onOpenBulkInvitations={handleOpenBulkInvitations}
-        onOpenEnhancedAIInterview={handleOpenEnhancedAIInterview}
+        onOpenUnifiedAIInterview={handleOpenUnifiedAIInterview}
       />
     );
   }
@@ -238,12 +220,11 @@ const Index = () => {
 
   if (currentView === "ai-assessment" && user) {
     return (
-      <div className="min-h-screen bg-black text-white">
-        <AIAssessment
-          onBack={handleBackToProfile}
-          checklist={assessmentType === 'self' ? SELF_CHECKLIST : assessmentType === 'subordinate' ? SUBORDINATE_CHECKLIST : MANAGER_CHECKLIST}
-        />
-      </div>
+      <AIAssessmentDialog
+        user={user}
+        onBack={handleBackToProfile}
+        checklist={assessmentType === 'self' ? SELF_CHECKLIST : assessmentType === 'subordinate' ? SUBORDINATE_CHECKLIST : MANAGER_CHECKLIST}
+      />
     );
   }
 
@@ -287,29 +268,8 @@ const Index = () => {
     );
   }
 
-  if (currentView === "assessment-360" && user) {
-    return (
-      <div className="min-h-screen bg-black text-white">
-        <Assessment360 user={user} onBack={handleBackToProfile} />
-      </div>
-    );
-  }
 
-  if (currentView === "mbti-test" && user) {
-    return (
-      <div className="min-h-screen bg-black text-white">
-        <MBTITest user={user} onBack={handleBackToProfile} />
-      </div>
-    );
-  }
 
-  if (currentView === "mbti-chat-test" && user) {
-    return (
-      <div className="min-h-screen bg-black text-white">
-        <MBTIChatTest user={user} onBack={handleBackToProfile} />
-      </div>
-    );
-  }
 
   if (currentView === "org-chart" && user) {
     return (
@@ -327,11 +287,17 @@ const Index = () => {
     );
   }
 
-  if (currentView === "enhanced-ai-interview" && user) {
+
+  if (currentView === "unified-ai-interview" && user) {
     return (
-      <div className="min-h-screen bg-black text-white">
-        <EnhancedAIInterview user={user} onBack={handleBackToProfile} />
-      </div>
+      <UnifiedAIInterview 
+        user={user} 
+        onBack={handleBackToProfile}
+        onComplete={(session) => {
+          console.log('Unified interview completed:', session);
+          handleBackToProfile();
+        }}
+      />
     );
   }
 

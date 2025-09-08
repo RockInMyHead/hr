@@ -181,7 +181,10 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
       
       // Автоматическая оценка ответа
       await ragService.autoEvaluateLastResponse();
-      
+
+      // Небольшая задержка для завершения оценки
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // Обновляем профиль
       const updatedProfile = ragService.getCurrentProfile();
       if (updatedProfile) {
@@ -576,7 +579,7 @@ ${finalProfile.recommendations.slice(0, 3).map(rec => `• ${rec}`).join('\n')}`
                       <div className="flex justify-between text-sm">
                         <span>Время сессии</span>
                         <span className="font-medium">
-                          {Math.round((Date.now() - currentProfile.timestamp) / 60000)} мин
+                          {Math.round((Date.now() - (currentProfile.timestamp || Date.now())) / 60000)} мин
                         </span>
                       </div>
                     </div>

@@ -18,7 +18,9 @@ import {
   MessageSquare
 } from 'lucide-react';
 import type { AppUser } from '@/types/profile';
-import type { MBTIProfile, MBTI_TYPES } from '@/types/extended-profile';
+import type { MBTIProfile } from '@/types/extended-profile';
+import { getMBTITypeDescription } from '@/types/extended-profile';
+import MBTIService from '@/services/mbtiService';
 
 interface MBTITestProps {
   user: AppUser;
@@ -197,6 +199,8 @@ export function MBTITest({ user, onBack, onComplete }: MBTITestProps) {
   const [isCompleted, setIsCompleted] = useState(false);
   const [result, setResult] = useState<MBTIProfile | null>(null);
   const [showResults, setShowResults] = useState(false);
+  const [isGeneratingResults, setIsGeneratingResults] = useState(false);
+  const [mbtiService] = useState(() => new MBTIService());
 
   // Проверка на завершенность теста
   useEffect(() => {
@@ -206,36 +210,50 @@ export function MBTITest({ user, onBack, onComplete }: MBTITestProps) {
   }, [answers]);
 
   // Расчет результатов MBTI
-  const calculateResults = () => {
-    const scores = {
-      E: 0, I: 0,
-      S: 0, N: 0,
-      T: 0, F: 0,
-      J: 0, P: 0
-    };
+  const calculateResults = async () => {
+    setIsGeneratingResults(true);
 
-    // Подсчет очков по каждому измерению
-    MBTI_QUESTIONS.forEach(question => {
-      const answer = answers[question.id];
-      if (answer) {
-        if (question.dimension === 'EI') {
-          if (answer === 'A') scores.E += question.aPoints;
-          else scores.I += 1;
-        } else if (question.dimension === 'SN') {
-          if (answer === 'A') scores.S += question.aPoints;
-          else scores.N += 1;
-        } else if (question.dimension === 'TF') {
-          if (answer === 'A') scores.T += question.aPoints;
-          else scores.F += 1;
-        } else if (question.dimension === 'JP') {
-          if (answer === 'A') scores.J += question.aPoints;
-          else scores.P += 1;
+    try {
+      const scores = {
+        E: 0, I: 0,
+        S: 0, N: 0,
+        T: 0, F: 0,
+        J: 0, P: 0
+      };
+
+      // Подсчет очков по каждому измерению
+      MBTI_QUESTIONS.forEach(question => {
+        const answer = answers[question.id];
+        if (answer) {
+          if (question.dimension === 'EI') {
+            if (answer === 'A') scores.E += question.aPoints;
+            else scores.I += 1;
+          } else if (question.dimension === 'SN') {
+            if (answer === 'A') scores.S += question.aPoints;
+            else scores.N += 1;
+          } else if (question.dimension === 'TF') {
+            if (answer === 'A') scores.T += question.aPoints;
+            else scores.F += 1;
+          } else if (question.dimension === 'JP') {
+            if (answer === 'A') scores.J += question.aPoints;
+            else scores.P += 1;
+          }
         }
-      }
-    });
+      });
 
-    // Определение типа
-    const type = `${scores.E > scores.I ? 'E' : 'I'}${scores.S > scores.N ? 'S' : 'N'}${scores.T > scores.F ? 'T' : 'F'}${scores.J > scores.P ? 'J' : 'P'}` as keyof typeof MBTI_TYPES;
+      // Определение типа
+      const type = `${scores.E > scores.I ? 'E' : 'I'}${scores.S > scores.N ? 'S' : 'N'}${scores.T > scores.F ? 'T' : 'F'}${scores.J > scores.P ? 'J' : 'P'}`;
+
+      // Генерация динамических результатов через AI
+      const [workPreferences, teamRole, stressFactors, motivators] = await Promise.all([
+        mbtiService.generateWorkPreferences(type),
+        mbtiService.generateTeamRole(type),
+        mbtiService.generateStressFactors(type),
+        mbtiService.generateMotivators(type)
+      ]);
+
+    // Получаем описание типа MBTI
+    const typeDescription = await getMBTITypeDescription(type as any);
 
     // Создание профиля
     const profile: MBTIProfile = {
@@ -246,72 +264,87 @@ export function MBTITest({ user, onBack, onComplete }: MBTITestProps) {
         thinking: Math.round((scores.T / (scores.T + scores.F)) * 100),
         judging: Math.round((scores.J / (scores.J + scores.P)) * 100)
       },
-      strengths: MBTI_TYPES[type]?.strengths || [],
-      developmentAreas: MBTI_TYPES[type]?.challenges || [],
-      workPreferences: generateWorkPreferences(type),
-      communicationStyle: MBTI_TYPES[type]?.workStyle || '',
-      teamRole: generateTeamRole(type),
-      stressFactors: generateStressFactors(type),
-      motivators: generateMotivators(type)
+      strengths: typeDescription.strengths,
+      developmentAreas: typeDescription.challenges,
+      workPreferences,
+      communicationStyle: typeDescription.workStyle,
+      teamRole,
+      stressFactors,
+      motivators
     };
 
-    setResult(profile);
-    setIsCompleted(true);
+      setResult(profile);
+      setIsCompleted(true);
 
-    // Сохранение результата
-    const savedProfiles = localStorage.getItem('mbti-profiles') || '{}';
-    const profiles = JSON.parse(savedProfiles);
-    profiles[user.email || user.name] = profile;
-    localStorage.setItem('mbti-profiles', JSON.stringify(profiles));
+      // Сохранение результата
+      const savedProfiles = localStorage.getItem('mbti-profiles') || '{}';
+      const profiles = JSON.parse(savedProfiles);
+      profiles[user.email || user.name] = profile;
+      localStorage.setItem('mbti-profiles', JSON.stringify(profiles));
 
-    if (onComplete) {
-      onComplete(profile);
+      if (onComplete) {
+        onComplete(profile);
+      }
+    } catch (error) {
+      console.error('Error calculating MBTI results:', error);
+
+      // Fallback к базовым результатам
+      const scores = {
+        E: 0, I: 0,
+        S: 0, N: 0,
+        T: 0, F: 0,
+        J: 0, P: 0
+      };
+
+      MBTI_QUESTIONS.forEach(question => {
+        const answer = answers[question.id];
+        if (answer) {
+          if (question.dimension === 'EI') {
+            if (answer === 'A') scores.E += question.aPoints;
+            else scores.I += 1;
+          } else if (question.dimension === 'SN') {
+            if (answer === 'A') scores.S += question.aPoints;
+            else scores.N += 1;
+          } else if (question.dimension === 'TF') {
+            if (answer === 'A') scores.T += question.aPoints;
+            else scores.F += 1;
+          } else if (question.dimension === 'JP') {
+            if (answer === 'A') scores.J += question.aPoints;
+            else scores.P += 1;
+          }
+        }
+      });
+
+      const type = `${scores.E > scores.I ? 'E' : 'I'}${scores.S > scores.N ? 'S' : 'N'}${scores.T > scores.F ? 'T' : 'F'}${scores.J > scores.P ? 'J' : 'P'}`;
+
+      const fallbackProfile: MBTIProfile = {
+        type,
+        dimensions: {
+          extraversion: Math.round((scores.E / (scores.E + scores.I)) * 100),
+          sensing: Math.round((scores.S / (scores.S + scores.N)) * 100),
+          thinking: Math.round((scores.T / (scores.T + scores.F)) * 100),
+          judging: Math.round((scores.J / (scores.J + scores.P)) * 100)
+        },
+        strengths: ['Уникальность', 'Индивидуальность', 'Самобытность'],
+        developmentAreas: ['Адаптация', 'Понимание другими'],
+        workPreferences: ['Сбалансированная рабочая среда', 'Четкие цели', 'Обратная связь'],
+        communicationStyle: 'Работает над индивидуальными задачами',
+        teamRole: 'Универсальный участник команды',
+        stressFactors: ['Неопределенность', 'Конфликты', 'Перегрузка'],
+        motivators: ['Достижение целей', 'Обратная связь', 'Развитие']
+      };
+
+      setResult(fallbackProfile);
+      setIsCompleted(true);
+
+      if (onComplete) {
+        onComplete(fallbackProfile);
+      }
+    } finally {
+      setIsGeneratingResults(false);
     }
   };
 
-  // Генерация рабочих предпочтений
-  const generateWorkPreferences = (type: string): string[] => {
-    const preferences: Record<string, string[]> = {
-      'INTJ': ['Автономная работа', 'Стратегическое планирование', 'Сложные проблемы', 'Долгосрочные цели'],
-      'ENFP': ['Творческие проекты', 'Командная работа', 'Разнообразие задач', 'Взаимодействие с людьми'],
-      'ISTJ': ['Четкие процедуры', 'Стабильная среда', 'Детальная работа', 'Ответственные задачи'],
-      'ESTP': ['Практические задачи', 'Быстрые результаты', 'Активная деятельность', 'Работа с людьми']
-    };
-    return preferences[type] || ['Сбалансированная рабочая среда', 'Четкие цели', 'Обратная связь'];
-  };
-
-  // Генерация роли в команде
-  const generateTeamRole = (type: string): string => {
-    const roles: Record<string, string> = {
-      'INTJ': 'Стратег и аналитик',
-      'ENFP': 'Генератор идей и мотиватор',
-      'ISTJ': 'Исполнитель и координатор',
-      'ESTP': 'Решатель проблем и медиатор'
-    };
-    return roles[type] || 'Универсальный участник команды';
-  };
-
-  // Генерация факторов стресса
-  const generateStressFactors = (type: string): string[] => {
-    const factors: Record<string, string[]> = {
-      'INTJ': ['Микроменеджмент', 'Неэффективные процессы', 'Частые перерывания'],
-      'ENFP': ['Рутинная работа', 'Жесткие ограничения', 'Изоляция от людей'],
-      'ISTJ': ['Постоянные изменения', 'Неопределенность', 'Хаотичная среда'],
-      'ESTP': ['Долгое планирование', 'Теоретическая работа', 'Монотонность']
-    };
-    return factors[type] || ['Неопределенность', 'Конфликты', 'Перегрузка'];
-  };
-
-  // Генерация мотиваторов
-  const generateMotivators = (type: string): string[] => {
-    const motivators: Record<string, string[]> = {
-      'INTJ': ['Автономия', 'Интеллектуальные вызовы', 'Долгосрочное влияние'],
-      'ENFP': ['Признание', 'Творческая свобода', 'Развитие людей'],
-      'ISTJ': ['Стабильность', 'Признание надежности', 'Четкие стандарты'],
-      'ESTP': ['Немедленные результаты', 'Практическое применение', 'Динамичная среда']
-    };
-    return motivators[type] || ['Достижение целей', 'Обратная связь', 'Развитие'];
-  };
 
   // Обработка ответа
   const handleAnswer = (questionId: number, answer: 'A' | 'B') => {
@@ -636,10 +669,17 @@ export function MBTITest({ user, onBack, onComplete }: MBTITestProps) {
               <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
               <h2 className="text-2xl font-bold mb-2">Тест завершен!</h2>
               <p className="text-gray-400 mb-6">
-                Все вопросы отвечены. Готов анализ вашего типа личности.
+                {isGeneratingResults
+                  ? 'Генерируем персонализированные рекомендации через ИИ...'
+                  : 'Все вопросы отвечены. Готов анализ вашего типа личности.'
+                }
               </p>
-              <Button onClick={showResultsScreen} className="bg-purple-600 hover:bg-purple-700">
-                Показать результаты
+              <Button
+                onClick={showResultsScreen}
+                disabled={isGeneratingResults}
+                className="bg-purple-600 hover:bg-purple-700"
+              >
+                {isGeneratingResults ? 'Генерация результатов...' : 'Показать результаты'}
               </Button>
             </CardContent>
           </Card>

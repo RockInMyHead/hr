@@ -14,6 +14,53 @@ export interface CompetencyDefinition {
   weight?: number; // Вес компетенции в общей оценке
 }
 
+// Динамическая генерация описаний компетенций
+import CompetenciesService, { CompetencyId, GeneratedCompetencyDefinition } from '@/services/competenciesService';
+
+// Кеш для сгенерированных компетенций
+let competenciesCache: Record<string, CompetencyDefinition> | null = null;
+let competenciesService: CompetenciesService | null = null;
+
+// Функция для получения описания компетенции
+export async function getCompetencyDefinition(competencyId: string): Promise<CompetencyDefinition> {
+  if (!competenciesService) {
+    competenciesService = new CompetenciesService();
+  }
+
+  const generated = await competenciesService.getCompetencyDefinition(competencyId as CompetencyId);
+  return convertToCompetencyDefinition(generated);
+}
+
+// Функция для получения всех компетенций
+export async function getAllCompetencyDefinitions(): Promise<Record<string, CompetencyDefinition>> {
+  if (!competenciesService) {
+    competenciesService = new CompetenciesService();
+  }
+
+  if (!competenciesCache) {
+    const generated = await competenciesService.getAllCompetencyDefinitions();
+    competenciesCache = {};
+
+    Object.entries(generated).forEach(([id, generatedDef]) => {
+      competenciesCache![id] = convertToCompetencyDefinition(generatedDef);
+    });
+  }
+
+  return competenciesCache;
+}
+
+// Конвертация сгенерированного определения в стандартный формат
+function convertToCompetencyDefinition(generated: GeneratedCompetencyDefinition): CompetencyDefinition {
+  return {
+    id: generated.id,
+    name: generated.name,
+    description: generated.description,
+    category: generated.category,
+    weight: generated.weight,
+    values: generated.values
+  };
+}
+
 export interface EmployeeCompetency {
   competencyId: string;
   employeeId: string;

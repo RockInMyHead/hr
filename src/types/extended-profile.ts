@@ -197,6 +197,35 @@ export const MBTI_TYPES = {
   // Добавим остальные типы по мере необходимости
 } as const;
 
+// Динамическая генерация описаний MBTI типов
+import MBTITypesService, { MBTITypeDescription, MBTITypeCode } from '@/services/mbtiTypesService';
+
+// Кеш для сгенерированных типов
+let mbtiTypesCache: Record<MBTITypeCode, MBTITypeDescription> | null = null;
+let mbtiTypesService: MBTITypesService | null = null;
+
+// Функция для получения описания типа MBTI
+export async function getMBTITypeDescription(typeCode: MBTITypeCode): Promise<MBTITypeDescription> {
+  if (!mbtiTypesService) {
+    mbtiTypesService = new MBTITypesService();
+  }
+
+  return await mbtiTypesService.getMBTITypeDescription(typeCode);
+}
+
+// Функция для получения всех типов MBTI
+export async function getAllMBTITypes(): Promise<Record<MBTITypeCode, MBTITypeDescription>> {
+  if (!mbtiTypesService) {
+    mbtiTypesService = new MBTITypesService();
+  }
+
+  if (!mbtiTypesCache) {
+    mbtiTypesCache = await mbtiTypesService.getAllMBTITypes();
+  }
+
+  return mbtiTypesCache;
+}
+
 export const NPS_CATEGORIES = {
   promoter: {
     range: [9, 10],
