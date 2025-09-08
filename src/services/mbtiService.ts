@@ -87,6 +87,58 @@ ${this.conversationContext.conversationHistory.map(msg =>
     return basePrompt;
   }
 
+  // Анализ ответа для извлечения MBTI данных
+  async analyzeResponse(userMessage: string, phase: string): Promise<{ personalityScores: Record<string, number> }> {
+    try {
+      const analysisPrompt = `Проанализируй ответ кандидата и определи, какие MBTI шкалы он затрагивает.
+
+ОТВЕТ КАНДИДАТА: "${userMessage}"
+
+АНАЛИЗИРУЙ:
+- Экстраверсия (E) vs Интроверсия (I): любит ли общаться, групповую работу, уединение
+- Сенсорика (S) vs Интуиция (N): фокус на фактах/деталях или на возможностях/будущем
+- Мышление (T) vs Чувства (F): логика/объективность или эмпатия/гармония
+- Суждение (J) vs Восприятие (P): структура/планирование или гибкость/спонтанность
+
+Верни JSON с оценками от -5 до +5 для каждой шкалы:
+{
+  "E": 2, "I": -2,
+  "S": 1, "N": -1,
+  "T": 3, "F": -3,
+  "J": 0, "P": 0
+}
+
+Положительные значения означают склонность к первому типу, отрицательные - ко второму.`;
+
+      const messages = [
+        { role: 'system', content: analysisPrompt }
+      ];
+
+      const response = await this.callOpenAI(messages, 'gpt-4o-mini');
+      const scores = JSON.parse(response);
+
+      // Обновляем контекст беседы
+      Object.keys(scores).forEach(key => {
+        if (this.conversationContext.personalityScores[key] !== undefined) {
+          this.conversationContext.personalityScores[key] += scores[key];
+        }
+      });
+
+      return { personalityScores: scores };
+    } catch (error) {
+      console.error('MBTI Response analysis error:', error);
+      // Возвращаем нейтральные оценки
+      return {
+        personalityScores: {
+          E: 0, I: 0,
+          S: 0, N: 0,
+          T: 0, F: 0,
+          J: 0, P: 0
+        }
+      };
+    }
+  }
+
   // Получить ответ AI на основе фазы беседы
   async getChatResponse(userMessage: string, phase: 'intro' | 'questioning' | 'analysis'): Promise<string> {
     try {

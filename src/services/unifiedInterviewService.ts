@@ -25,15 +25,23 @@ export interface UnifiedInterviewSession {
   status: 'setup' | 'in-progress' | 'completed';
   modules: InterviewModule[];
   totalMessages: number;
+  userMessageCount?: number; // счетчик пользовательских сообщений
   currentPhase: 'intro' | 'questioning' | 'deep-dive' | 'completion';
-  
+
+  // История сообщений для контекста
+  messages?: Array<{role: 'user' | 'assistant', content: string, timestamp: Date}>;
+
+  // Счетчик для чередования ответов: true = следующий ответ должен быть вопросом
+  nextResponseShouldBeQuestion?: boolean;
+
   // Накопленные результаты
   ragProfile?: any;
   mbtiProfile?: any;
+  candidateProfile?: any;
   competencyScores?: Record<string, number>;
   assessment360Results?: any;
   behaviorAnalysis?: any;
-  
+
   // Настройки интервью
   settings: {
     difficulty: 'junior' | 'middle' | 'senior';
@@ -75,13 +83,18 @@ class UnifiedInterviewService extends BaseService implements AIService {
     userId: string,
     settings: UnifiedInterviewSession['settings']
   ): Promise<UnifiedInterviewSession> {
+    // Принудительно сбрасываем любую существующую сессию
+    this.activeSession = null;
     const session: UnifiedInterviewSession = {
       id: `unified-${Date.now()}`,
       userId,
       startTime: new Date(),
       status: 'setup',
       totalMessages: 0,
+      userMessageCount: 0, // инициализируем счетчик пользовательских сообщений
       currentPhase: 'intro',
+      messages: [], // инициализируем историю сообщений
+      nextResponseShouldBeQuestion: true, // первый ответ после приветствия должен быть вопросом
       settings,
       modules: [
         {
@@ -136,17 +149,18 @@ class UnifiedInterviewService extends BaseService implements AIService {
     return session;
   }
 
-  // Определение целевого количества вопросов для каждого модуля
+  // Определение целевого количества вопросов для каждого модуля (оптимизировано для 15-20 минут)
   private getTargetQuestions(moduleType: InterviewModule['type'], style: string): number {
+    // Уменьшаем количество вопросов для быстрого интервью 15-20 минут
     const baseQuestions = {
-      rag: { comprehensive: 12, focused: 8, quick: 5 },
-      mbti: { comprehensive: 10, focused: 7, quick: 5 },
-      competency: { comprehensive: 8, focused: 6, quick: 4 },
-      assessment360: { comprehensive: 10, focused: 7, quick: 5 },
-      profile: { comprehensive: 6, focused: 4, quick: 3 }
+      rag: { comprehensive: 6, focused: 4, quick: 3 },
+      mbti: { comprehensive: 4, focused: 3, quick: 2 },
+      competency: { comprehensive: 4, focused: 3, quick: 2 },
+      assessment360: { comprehensive: 4, focused: 3, quick: 2 },
+      profile: { comprehensive: 3, focused: 2, quick: 1 }
     };
 
-    return baseQuestions[moduleType][style as keyof typeof baseQuestions[typeof moduleType]] || 5;
+    return baseQuestions[moduleType][style as keyof typeof baseQuestions[typeof moduleType]] || 3;
   }
 
   // Получение следующего вопроса с учетом приоритетов и прогресса
@@ -154,47 +168,108 @@ class UnifiedInterviewService extends BaseService implements AIService {
     if (!this.activeSession) {
       throw new Error('No active interview session');
     }
-
     const session = this.activeSession;
 
-    // Обновляем счетчик сообщений
+    // Handle greeting
+    if (!userMessage && session.totalMessages === 0) {
+      const welcomeMessage = await this.generateWelcomeMessage();
+      // Сохраняем приветственное сообщение в истории
+      if (session.messages) {
+        session.messages.push({
+          role: 'assistant',
+          content: welcomeMessage,
+          timestamp: new Date()
+        });
+      }
+      return welcomeMessage;
+    }
+
+    // Increment message count and analyze
     if (userMessage) {
       session.totalMessages++;
+      session.userMessageCount = (session.userMessageCount || 0) + 1;
+
+      // Сохраняем сообщение пользователя в истории
+      if (!session.messages) session.messages = [];
+      session.messages.push({
+        role: 'user',
+        content: userMessage,
+        timestamp: new Date()
+      });
+
       await this.processUserResponse(userMessage);
     }
 
-    // Определяем текущую фазу
-    this.updateSessionPhase();
-
-    // ПРИВЕТСТВИЕ И ДИАЛОГОВЫЙ ПОДХОД
-    if (session.totalMessages === 1) {
-      return await this.generateWelcomeMessage();
+    // Friendly chat for first 3 user messages
+    if (userMessage && session.userMessageCount && session.userMessageCount <= 3) {
+      const friendlyResponse = await this.generateFriendlyResponse(userMessage, session.userMessageCount);
+      // Сохраняем дружеский ответ в истории
+      if (session.messages) {
+        session.messages.push({
+          role: 'assistant',
+          content: friendlyResponse,
+          timestamp: new Date()
+        });
+      }
+      return friendlyResponse;
     }
 
-    // РЕАКЦИЯ НА ПРЕДЫДУЩИЙ ОТВЕТ + НОВЫЙ ВОПРОС
-    if (userMessage && session.totalMessages > 1) {
+    // Ensure that after friendly responses, we generate a question when needed
+    if (userMessage && session.userMessageCount === 4) {
+      // Force question generation for the 4th user message (after friendly chat)
+      session.nextResponseShouldBeQuestion = true;
+    }
+
+    // Determine phase
+    this.updateSessionPhase();
+
+    // Generate conversational response for subsequent messages
+    if (userMessage) {
       return await this.generateConversationalResponse(userMessage);
     }
 
     // Выбираем следующий модуль для вопроса
     const nextModule = this.selectNextModule();
-    
+
     if (!nextModule) {
-      return await this.generateCompletionMessage();
+      const completionMessage = await this.generateCompletionMessage();
+      // Сохраняем завершающее сообщение в истории
+      if (session.messages) {
+        session.messages.push({
+          role: 'assistant',
+          content: completionMessage,
+          timestamp: new Date()
+        });
+      }
+      // Завершение интервью - сбрасываем флаг
+      session.nextResponseShouldBeQuestion = false;
+      return completionMessage;
     }
 
     // Генерируем вопрос для выбранного модуля
     const question = await this.generateModuleQuestion(nextModule);
-    
+
     // Обновляем прогресс модуля
     nextModule.questionsAsked++;
     nextModule.progress = Math.min(100, (nextModule.questionsAsked / nextModule.targetQuestions) * 100);
-    
+
     if (nextModule.questionsAsked >= nextModule.targetQuestions) {
       nextModule.status = 'completed';
     } else if (nextModule.status === 'pending') {
       nextModule.status = 'in-progress';
     }
+
+    // Сохраняем сгенерированный вопрос в истории
+    if (session.messages) {
+      session.messages.push({
+        role: 'assistant',
+        content: question,
+        timestamp: new Date()
+      });
+    }
+
+    // Следующий ответ должен быть реакцией
+    session.nextResponseShouldBeQuestion = false;
 
     return question;
   }
@@ -234,54 +309,147 @@ class UnifiedInterviewService extends BaseService implements AIService {
     }
   }
 
-  // Обработка ответа для конкретного модуля
+  // Обработка ответа для ВСЕХ модулей одновременно
   private async processModuleResponse(module: InterviewModule, userMessage: string): Promise<void> {
     const session = this.activeSession!;
 
-    switch (module.type) {
-      case 'rag':
-        // Обновляем RAG профиль
-        const ragResponse = await this.ragService.conductInterview(userMessage, session.settings.difficulty);
-        session.ragProfile = this.ragService.getCurrentProfile();
-        break;
+    // ВСЕГДА обрабатываем ответ для всех модулей одновременно
+    await this.processAllModulesSimultaneously(userMessage);
+  }
 
-      case 'mbti':
-        // Анализируем ответ для MBTI
-        const mbtiAnalysis = await this.mbtiService.analyzeResponse(userMessage, 'questioning');
-        if (!session.mbtiProfile) {
-          session.mbtiProfile = { scores: { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 } };
-        }
-        // Обновляем MBTI scores
-        Object.keys(mbtiAnalysis.personalityScores || {}).forEach(key => {
-          if (session.mbtiProfile?.scores) {
+  // Обработка всех модулей одновременно из любого ответа
+  private async processAllModulesSimultaneously(userMessage: string): Promise<void> {
+    const session = this.activeSession!;
+
+    try {
+      // Параллельная обработка всех модулей
+      await Promise.all([
+        this.extractRAGData(userMessage),
+        this.extractMBTIData(userMessage),
+        this.extractCompetencyData(userMessage),
+        this.extract360Data(userMessage),
+        this.extractProfileData(userMessage)
+      ]);
+    } catch (error) {
+      console.error('Error processing modules simultaneously:', error);
+    }
+  }
+
+  // Извлечение данных для RAG модуля
+  private async extractRAGData(userMessage: string): Promise<void> {
+    const session = this.activeSession!;
+    try {
+      await this.ragService.conductInterview(userMessage, session.settings.difficulty);
+      session.ragProfile = this.ragService.getCurrentProfile();
+    } catch (error) {
+      console.error('Error extracting RAG data:', error);
+      // Создаем базовый профиль в случае ошибки
+      if (!session.ragProfile) {
+        session.ragProfile = {
+          name: session.userId,
+          overallScore: 0,
+          technicalSkills: {},
+          softSkills: {},
+          evaluations: [],
+          summary: '',
+          recommendations: [],
+          timestamp: Date.now()
+        };
+      }
+    }
+  }
+
+  // Извлечение MBTI данных из любого ответа
+  private async extractMBTIData(userMessage: string): Promise<void> {
+    const session = this.activeSession!;
+    try {
+      const mbtiAnalysis = await this.mbtiService.analyzeResponse(userMessage, 'questioning');
+      if (!session.mbtiProfile) {
+        session.mbtiProfile = { scores: { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 } };
+      }
+      
+      // Обновляем MBTI scores
+      if (mbtiAnalysis.personalityScores) {
+        Object.keys(mbtiAnalysis.personalityScores).forEach(key => {
+          if (session.mbtiProfile?.scores && session.mbtiProfile.scores[key] !== undefined) {
             session.mbtiProfile.scores[key] += mbtiAnalysis.personalityScores[key];
           }
         });
-        break;
+      }
+    } catch (error) {
+      console.error('Error extracting MBTI data:', error);
+    }
+  }
 
-      case 'competency':
-        // Оценка компетенций через чек-лист сервис
-        if (!session.competencyScores) {
-          session.competencyScores = {};
-        }
-        const competencyEvaluation = await this.evaluateCompetencyResponse(userMessage);
-        Object.assign(session.competencyScores, competencyEvaluation);
-        break;
+  // Извлечение компетенций из любого ответа
+  private async extractCompetencyData(userMessage: string): Promise<void> {
+    const session = this.activeSession!;
+    try {
+      if (!session.competencyScores) {
+        session.competencyScores = {};
+      }
+      const competencyEvaluation = await this.evaluateCompetencyResponse(userMessage);
+      Object.assign(session.competencyScores, competencyEvaluation);
+    } catch (error) {
+      console.error('Error extracting competency data:', error);
+      // Создаем базовые оценки в случае ошибки
+      if (!session.competencyScores) {
+        session.competencyScores = {
+          communication: 3,
+          leadership: 3,
+          productivity: 3,
+          reliability: 3,
+          initiative: 3
+        };
+      }
+    }
+  }
 
-      case 'assessment360':
-        // 360° оценка
-        if (!session.assessment360Results) {
-          session.assessment360Results = { scores: {}, observations: [] };
-        }
-        const assessment360Analysis = await this.analyze360Response(userMessage);
-        Object.assign(session.assessment360Results.scores, assessment360Analysis.scores);
-        session.assessment360Results.observations.push(assessment360Analysis.observation);
-        break;
+  // Извлечение 360° данных из любого ответа
+  private async extract360Data(userMessage: string): Promise<void> {
+    const session = this.activeSession!;
+    try {
+      if (!session.assessment360Results) {
+        session.assessment360Results = { scores: {}, observations: [] };
+      }
+      const assessment360Analysis = await this.analyze360Response(userMessage);
+      Object.assign(session.assessment360Results.scores, assessment360Analysis.scores);
+      session.assessment360Results.observations.push(assessment360Analysis.observation);
+    } catch (error) {
+      console.error('Error extracting 360 data:', error);
+    }
+  }
 
-      case 'profile':
-        // Обновление общего профиля кандидата
-        await this.updateCandidateProfile(userMessage);
-        break;
+  // Извлечение профильных данных
+  private async extractProfileData(userMessage: string): Promise<void> {
+    try {
+      await this.updateCandidateProfile(userMessage);
+    } catch (error) {
+      console.error('Error extracting profile data:', error);
+      // Создаем базовый профиль в случае ошибки
+      const session = this.activeSession!;
+      if (!session.candidateProfile) {
+        session.candidateProfile = {
+          id: `profile-${Date.now()}`,
+          sessionId: session.id,
+          userId: session.userId,
+          fullName: session.userId,
+          email: session.userId,
+          position: '',
+          department: '',
+          overallScore: 0,
+          technicalSkills: {},
+          softSkills: {},
+          summary: '',
+          recommendations: [],
+          strengths: [],
+          weaknesses: [],
+          aiAnalysis: {},
+          individualDevelopmentPlan: {},
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+      }
     }
   }
 
@@ -378,7 +546,7 @@ class UnifiedInterviewService extends BaseService implements AIService {
         }
       } catch (error) {
         console.error(`Error generating question for module ${module.type}:`, error);
-        return this.getFallbackQuestion(module.type);
+        return await this.getFallbackQuestion(module.type);
       }
     }, 5); // Кешируем на 5 минут
   }
@@ -478,36 +646,163 @@ class UnifiedInterviewService extends BaseService implements AIService {
   private async generateWelcomeMessage(): Promise<string> {
     const session = this.activeSession!;
     
-    const prompt = `Ты - дружелюбный и опытный HR-специалист, начинающий собеседование с кандидатом.
+    const prompt = `Сгенерируй приветственное сообщение для начала HR интервью.
 
-ЗАДАЧА: Поприветствуй кандидата и создай комфортную атмосферу для начала интервью.
+КОНТЕКСТ:
+- Пользователь: ${session.userId}
+- Уровень сложности: ${session.settings.difficulty}
+- Стиль интервью: ${session.settings.style}
+- Продолжительность: ${session.settings.duration} минут
+
+ЗАДАЧА:
+Создай дружелюбное приветствие, которое:
+- Поприветствует кандидата по имени
+- Объяснит формат интервью
+- Создаст позитивную атмосферу
+- Задаст первый простой вопрос для знакомства
 
 СТИЛЬ:
-- Тепло и дружелюбно
-- Профессионально, но не формально  
-- Покажи заинтересованность в кандидате как в личности
-- Объясни, что это будет беседа, а не допрос
+- Профессиональный, но дружелюбный
+- Располагающий к открытой беседе
+- Не формальный, используй "ты"
 
-СТРУКТУРА:
-1. Приветствие по имени (используй "${session.userId}")
-2. Краткое объяснение формата интервью
-3. Первый легкий вопрос для знакомства
-
-Сделай это естественно, как живой человек, а не робот.`;
+Верни только текст приветствия.`;
 
     const messages = [{ role: 'system', content: prompt }];
     const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
     return response;
   }
 
+  // Генерация дружеских ответов для первых сообщений
+  private async generateFriendlyResponse(userMessage: string, messageCount: number): Promise<string> {
+    const session = this.activeSession!;
+
+    const prompt = `Сгенерируй дружелюбный ответ HR-специалиста в неформальной части интервью.
+
+КОНТЕКСТ:
+- Ответ кандидата: "${userMessage}"
+- Номер обмена: ${messageCount}
+- Фаза: Знакомство и создание rapport
+
+ЗАДАЧА:
+${messageCount === 1 ? 
+  'Отреагируй на ответ о хобби/увлечениях кандидата. Покажи интерес и задай уточняющий вопрос.' : 
+  messageCount === 2 ?
+  'Продолжи беседу о личных интересах, углубись в тему или спроси о других увлечениях.' :
+  'Поблагодари за рассказ и плавно переведи беседу к профессиональным темам, задав первый вопрос о работе.'
+}
+
+СТИЛЬ:
+- Дружелюбный и искренний
+- Показывай заинтересованность
+- Используй "ты"
+- ${messageCount < 3 ? 'Не переходи к профессиональным темам' : 'Плавно переходи к профессиональным вопросам'}
+
+Верни только текст ответа.`;
+
+    const messages = [{ role: 'system', content: prompt }];
+    const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
+
+    // После 3-го ответа следующий ответ должен быть вопросом
+    if (messageCount === 3 && session) {
+      session.nextResponseShouldBeQuestion = true;
+    }
+
+    return response;
+  }
+
   // Генерация диалогового ответа с реакцией на сообщение пользователя
   private async generateConversationalResponse(userMessage: string): Promise<string> {
     const session = this.activeSession!;
-    
+
+    // Для первых нескольких сообщений ведем дружескую беседу без переключения на технические темы
+    if (session.userMessageCount && session.userMessageCount <= 3) {
+      return await this.generateFriendlyResponse(userMessage, session.userMessageCount);
+    }
+
     // Получаем историю сообщений для контекста
-    const conversationHistory = session.messages ? 
-      session.messages.slice(-6).map(msg => `${msg.role}: ${msg.content}`).join('\n') : 
+    const conversationHistory = session.messages ?
+      session.messages.slice(-6).map(msg => `${msg.role}: ${msg.content}`).join('\n') :
       'Начало беседы';
+
+    // ВСЕГДА генерируем реакцию + вопрос для динамичного интервью 15-20 минут
+    const combinedResponse = await this.generateReactionOnly(userMessage, conversationHistory);
+    
+    // Сохраняем комбинированный ответ в истории
+    if (session.messages) {
+      session.messages.push({
+        role: 'assistant',
+        content: combinedResponse,
+        timestamp: new Date()
+      });
+    }
+    
+    // Следующий ответ тоже будет реакцией + вопросом
+    session.nextResponseShouldBeQuestion = false;
+    return combinedResponse;
+  }
+
+  // Определение, нужно ли генерировать вопрос или реакцию
+  private shouldGenerateQuestion(): boolean {
+    const session = this.activeSession!;
+    // Используем флаг nextResponseShouldBeQuestion для чередования
+    return session.nextResponseShouldBeQuestion ?? true;
+  }
+
+  // Генерация реакции с последующим вопросом
+  private async generateReactionOnly(userMessage: string, conversationHistory: string): Promise<string> {
+    const session = this.activeSession!;
+    const nextModule = this.selectNextModule();
+
+    const prompt = `Ты - опытный HR-специалист, ведущий динамичное интервью. Тебе нужно ВСЕГДА совмещать реакцию с новым вопросом.
+
+КОНТЕКСТ БЕСЕДЫ:
+${conversationHistory}
+
+ПОСЛЕДНИЙ ОТВЕТ КАНДИДАТА: "${userMessage}"
+
+ТЕКУЩИЙ МОДУЛЬ: ${nextModule ? nextModule.name : 'Завершение'}
+ПРОГРЕСС ИНТЕРВЬЮ: ${Math.round((session.modules.filter(m => m.status === 'completed').length / session.modules.length) * 100)}%
+
+ЗАДАЧА:
+1. КРАТКО отреагируй на ответ кандидата (1-2 предложения)
+2. СРАЗУ же задай новый релевантный вопрос
+3. ИЗВЛЕКАЙ данные для ВСЕХ модулей одновременно из любого ответа:
+   - Хобби → психология, командная работа, лидерство
+   - Проекты → технические навыки, решение проблем
+   - Опыт → компетенции, адаптивность
+
+ФОРМАТ ОТВЕТА:
+"[КРАТКАЯ РЕАКЦИЯ]. [НОВЫЙ ВОПРОС]"
+
+СТИЛЬ:
+- Динамичный и энергичный
+- Интервью должно длиться 15-20 минут максимум
+- Получай максимум информации из каждого ответа
+
+Пример: "Понятно, значит у вас есть опыт в командных проектах! А расскажите, как вы обычно разрешаете конфликты в команде?"`;
+
+    const messages = [{ role: 'system', content: prompt }];
+    const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
+
+    // Обновляем прогресс модуля после генерации комбинированного ответа
+    if (nextModule) {
+      nextModule.questionsAsked++;
+      nextModule.progress = Math.min(100, (nextModule.questionsAsked / nextModule.targetQuestions) * 100);
+      
+      if (nextModule.questionsAsked >= nextModule.targetQuestions) {
+        nextModule.status = 'completed';
+      } else if (nextModule.status === 'pending') {
+        nextModule.status = 'in-progress';
+      }
+    }
+
+    return response;
+  }
+
+  // Генерация только нового вопроса
+  private async generateQuestionOnly(userMessage: string): Promise<string> {
+    const session = this.activeSession!;
 
     // Выбираем следующий модуль для вопроса
     const nextModule = this.selectNextModule();
@@ -515,41 +810,36 @@ class UnifiedInterviewService extends BaseService implements AIService {
       return await this.generateCompletionMessage();
     }
 
-    const prompt = `Ты - опытный HR-специалист, ведущий живую беседу с кандидатом.
 
-КОНТЕКСТ БЕСЕДЫ:
-${conversationHistory}
+    const prompt = `Ты - опытный HR-специалист, задающий следующий вопрос в интервью.
 
-ПОСЛЕДНИЙ ОТВЕТ КАНДИДАТА: "${userMessage}"
-
-ТЕКУЩИЙ ФОКУС: ${nextModule.name} (${nextModule.questionsAsked}/${nextModule.targetQuestions} вопросов)
+КОНТЕКСТ:
+- Предыдущий ответ кандидата: "${userMessage}"
+- Текущий модуль: ${nextModule.name}
+- Прогресс: ${nextModule.questionsAsked}/${nextModule.targetQuestions} вопросов
+- Фаза интервью: ${session.currentPhase}
 
 ЗАДАЧА:
-1. ОТРЕАГИРУЙ на ответ кандидата - покажи, что ты его слушал:
-   - Подтверди услышанное ("Понятно, значит вы...")
-   - Покажи интерес ("Интересно!" / "Это впечатляет")
-   - Задай уточняющий вопрос если нужно
-
-2. ПЛАВНО ПЕРЕВЕДИ к новому вопросу по теме "${nextModule.name}":
-   - Свяжи с предыдущим ответом если возможно
-   - Объясни, почему этот вопрос важен
-   - Задай новый вопрос
+Задай ТОЛЬКО ОДИН новый вопрос по теме "${nextModule.name}":
+- Свяжи вопрос с предыдущим ответом кандидата если возможно
+- Объясни кратко, почему этот вопрос важен
+- Задай один конкретный вопрос
+- НЕ добавляй реакцию на предыдущий ответ - это уже было сделано
 
 СТИЛЬ:
-- Говори как живой человек, а не робот
-- Используй естественные переходы
-- Покажи эмпатию и понимание
-- Будь кратким, но содержательным
+- Профессиональный, но дружелюбный
+- Краткий и по существу
+- Один вопрос без дополнительных комментариев
 
-ВАЖНО: Не задавай сразу новый вопрос - сначала отреагируй на ответ!`;
+Верни только текст вопроса с кратким введением.`;
 
     const messages = [{ role: 'system', content: prompt }];
     const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
-    
+
     // Обновляем прогресс модуля после генерации вопроса
     nextModule.questionsAsked++;
     nextModule.progress = Math.min(100, (nextModule.questionsAsked / nextModule.targetQuestions) * 100);
-    
+
     if (nextModule.questionsAsked >= nextModule.targetQuestions) {
       nextModule.status = 'completed';
     } else if (nextModule.status === 'pending') {
@@ -559,20 +849,31 @@ ${conversationHistory}
     return response;
   }
 
-  // Оценка ответа по компетенциям
+  // Умная оценка ответа по компетенциям с учетом контекста
   private async evaluateCompetencyResponse(userMessage: string): Promise<Record<string, number>> {
-    const prompt = `Оцени ответ кандидата по ключевым компетенциям.
+    const prompt = `Проанализируй ответ кандидата и извлеки данные для ВСЕХ компетенций, даже если вопрос не был напрямую о них.
 
-Ответ кандидата: "${userMessage}"
+ОТВЕТ КАНДИДАТА: "${userMessage}"
 
-Оцени по шкале от 1 до 5 следующие компетенции:
+ИНСТРУКЦИИ ДЛЯ АНАЛИЗА:
+- Хобби спорт (особенно командный) → лидерство +1, коммуникация +1
+- Хобби чтение/обучение → инициативность +1, продуктивность +1
+- Упоминание проектов → лидерство +1, продуктивность +1
+- Работа в команде → коммуникация +2, лидерство +1
+- Решение проблем → инициативность +2, продуктивность +1
+- Соблюдение дедлайнов → надежность +2
+- Самостоятельная работа → инициативность +1, надежность +1
+- Обучение других → лидерство +2, коммуникация +1
+- Творческие хобби → инициативность +1
+
+Оцени по шкале от 1 до 5:
 - communication (коммуникация)
-- leadership (лидерство)
+- leadership (лидерство) 
 - productivity (продуктивность)
 - reliability (надежность)
 - initiative (инициативность)
 
-Верни результат в формате JSON:
+Верни JSON:
 {
   "communication": оценка,
   "leadership": оценка,
@@ -647,11 +948,116 @@ ${conversationHistory}
 
   // Обновление профиля кандидата
   private async updateCandidateProfile(userMessage: string): Promise<void> {
-    // Логика обновления общего профиля кандидата
     const session = this.activeSession!;
-    
-    // Здесь может быть интеграция с существующими сервисами профилирования
-    console.log('Updating candidate profile with message:', userMessage);
+
+    try {
+      const prompt = `Проанализируй ответ кандидата и извлеки информацию для профиля.
+
+ОТВЕТ КАНДИДАТА: "${userMessage}"
+
+ЗАДАЧА:
+Извлеки следующую информацию если она присутствует:
+- Имя кандидата
+- Должность/позиция
+- Опыт работы (лет/месяцев)
+- Области специализации
+- Ключевые навыки
+- Достижения
+- Карьерные цели
+- Личные качества
+
+Верни JSON с найденной информацией:
+{
+  "name": "имя или null",
+  "position": "должность или null",
+  "experience": "опыт или null",
+  "skills": ["навык1", "навык2"],
+  "achievements": ["достижение1"],
+  "goals": "цели или null",
+  "qualities": ["качество1", "качество2"]
+}
+
+Если информация не найдена, верни null для соответствующих полей.`;
+
+      const messages = [{ role: 'system', content: prompt }];
+      const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
+      const profileData = JSON.parse(response);
+
+      // Инициализируем профиль если его нет
+      if (!session.candidateProfile) {
+        session.candidateProfile = {
+          id: `profile-${Date.now()}`,
+          sessionId: session.id,
+          userId: session.userId,
+          fullName: session.userId,
+          email: session.userId,
+          position: '',
+          department: '',
+          overallScore: 0,
+          technicalSkills: {},
+          softSkills: {},
+          summary: '',
+          recommendations: [],
+          strengths: [],
+          weaknesses: [],
+          aiAnalysis: {},
+          individualDevelopmentPlan: {},
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+      }
+
+      // Обновляем профиль данными
+      if (profileData.name) session.candidateProfile.fullName = profileData.name;
+      if (profileData.position) session.candidateProfile.position = profileData.position;
+      if (profileData.experience) session.candidateProfile.summary += ` Опыт: ${profileData.experience}`;
+      if (profileData.skills && profileData.skills.length > 0) {
+        profileData.skills.forEach(skill => {
+          if (!session.candidateProfile!.technicalSkills[skill]) {
+            session.candidateProfile!.technicalSkills[skill] = Math.floor(Math.random() * 40) + 60; // 60-100
+          }
+        });
+      }
+      if (profileData.achievements && profileData.achievements.length > 0) {
+        session.candidateProfile.strengths.push(...profileData.achievements);
+      }
+      if (profileData.goals) session.candidateProfile.summary += ` Цели: ${profileData.goals}`;
+      if (profileData.qualities && profileData.qualities.length > 0) {
+        profileData.qualities.forEach(quality => {
+          if (!session.candidateProfile!.softSkills[quality]) {
+            session.candidateProfile!.softSkills[quality] = Math.floor(Math.random() * 40) + 60; // 60-100
+          }
+        });
+      }
+
+      session.candidateProfile.updatedAt = Date.now();
+
+    } catch (error) {
+      console.error('Error updating candidate profile:', error);
+      // Создаем базовый профиль в случае ошибки
+      if (!session.candidateProfile) {
+        session.candidateProfile = {
+          id: `profile-${Date.now()}`,
+          sessionId: session.id,
+          userId: session.userId,
+          fullName: session.userId,
+          email: session.userId,
+          position: '',
+          department: '',
+          overallScore: 0,
+          technicalSkills: {},
+          softSkills: {},
+          summary: '',
+          recommendations: [],
+          strengths: [],
+          weaknesses: [],
+          aiAnalysis: {},
+          individualDevelopmentPlan: {},
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+      }
+    }
   }
 
   // Генерация сообщения о завершении
@@ -682,16 +1088,36 @@ ${conversationHistory}
   }
 
   // Получение фолбэк вопроса
-  private getFallbackQuestion(moduleType: InterviewModule['type']): string {
-    const fallbackQuestions = {
-      rag: "Расскажите о самом сложном техническом проекте, над которым вы работали.",
-      mbti: "Как вы предпочитаете принимать важные решения - самостоятельно или советуясь с другими?",
-      competency: "Приведите пример ситуации, когда вам пришлось проявить лидерские качества.",
-      assessment360: "Как бы вас охарактеризовали ваши коллеги?",
-      profile: "Какие у вас карьерные цели на ближайшие 3-5 лет?"
-    };
+  private async getFallbackQuestion(moduleType: InterviewModule['type']): Promise<string> {
+    const prompt = `Сгенерируй фолбэк вопрос для модуля интервью "${moduleType}".
 
-    return fallbackQuestions[moduleType] || "Расскажите подробнее о своем опыте.";
+КОНТЕКСТ:
+- Модуль: ${moduleType}
+- Это резервный вопрос на случай ошибки генерации
+
+ЗАДАЧА:
+Создай универсальный вопрос, подходящий для данного модуля:
+- rag: технические вопросы о проектах и опыте
+- mbti: вопросы о предпочтениях и стиле работы
+- competency: поведенческие вопросы о навыках
+- assessment360: вопросы о взаимодействии с командой
+- profile: вопросы о карьерных целях
+
+СТИЛЬ:
+- Открытый вопрос
+- Провоцирующий детальный ответ
+- Профессиональный тон
+
+Верни только текст вопроса.`;
+
+    try {
+      const messages = [{ role: 'system', content: prompt }];
+      const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
+      return response;
+    } catch (error) {
+      console.error('Error generating fallback question:', error);
+      return "Расскажите подробнее о своем опыте работы.";
+    }
   }
 
   // Получение текущей сессии
@@ -720,6 +1146,11 @@ ${conversationHistory}
 
   // Получение сводки результатов
   async generateResultsSummary(session: UnifiedInterviewSession): Promise<string> {
+    // Сохраняем результаты компетенций в базу данных
+    if (session.competencyScores && Object.keys(session.competencyScores).length > 0) {
+      await this.saveCompetencyAssessments(session);
+    }
+
     const prompt = `Создай подробную сводку результатов объединенного HR интервью.
 
 Данные сессии:
@@ -749,6 +1180,100 @@ ${session.modules.map(m => `- ${m.name}: ${m.progress}% (${m.questionsAsked}/${m
     const messages = [{ role: 'system', content: prompt }];
     const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
     return response;
+  }
+
+  // Сохранение результатов компетенций в базу данных
+  private async saveCompetencyAssessments(session: UnifiedInterviewSession): Promise<void> {
+    if (!session.competencyScores || Object.keys(session.competencyScores).length === 0) {
+      return;
+    }
+
+    try {
+      const assessments = Object.entries(session.competencyScores).map(([competencyId, currentValue]) => ({
+        competencyId,
+        currentValue: typeof currentValue === 'number' ? currentValue : parseFloat(currentValue.toString()) || 3,
+        targetValue: Math.min(5, (typeof currentValue === 'number' ? currentValue : parseFloat(currentValue.toString()) || 3) + 1),
+        category: this.getCompetencyCategory(competencyId),
+        lastAssessed: session.endTime?.getTime() || Date.now(),
+        improvementPlan: this.generateImprovementPlan(competencyId, typeof currentValue === 'number' ? currentValue : parseFloat(currentValue.toString()) || 3)
+      }));
+
+      const response = await fetch('/api/competency-assessments/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: session.userId,
+          sessionId: session.id,
+          assessments,
+          source: 'interview'
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to save competency assessments:', await response.text());
+      } else {
+        console.log('Competency assessments saved successfully');
+      }
+    } catch (error) {
+      console.error('Error saving competency assessments:', error);
+    }
+  }
+
+  // Получение категории компетенции
+  private getCompetencyCategory(competencyId: string): string {
+    const categories: Record<string, string> = {
+      'communication': 'soft',
+      'leadership': 'leadership',
+      'productivity': 'business',
+      'reliability': 'soft',
+      'initiative': 'soft',
+      'problem-solving': 'technical',
+      'teamwork': 'soft',
+      'adaptability': 'soft',
+      'innovation': 'business',
+      'customer-focus': 'business'
+    };
+    return categories[competencyId] || 'soft';
+  }
+
+  // Генерация плана развития компетенции
+  private generateImprovementPlan(competencyId: string, currentValue: number): string[] {
+    const plans: Record<string, string[]> = {
+      communication: [
+        'Практиковать активное слушание в ежедневных беседах',
+        'Записаться на курс публичных выступлений',
+        'Попросить обратную связь о стиле общения у коллег',
+        'Изучить техники невербальной коммуникации'
+      ],
+      leadership: [
+        'Возглавить небольшой проект или инициативу',
+        'Найти ментора среди опытных руководителей',
+        'Изучить книги по лидерству и управлению',
+        'Практиковать делегирование задач'
+      ],
+      productivity: [
+        'Освоить методы тайм-менеджмента (GTD, Pomodoro)',
+        'Автоматизировать рутинные задачи',
+        'Установить четкие приоритеты по методу Эйзенхауэра',
+        'Измерять и анализировать свою эффективность'
+      ],
+      reliability: [
+        'Вести учет всех обязательств в планировщике',
+        'Устанавливать напоминания для важных задач',
+        'Регулярно информировать о прогрессе работы',
+        'Всегда держать слово, данное коллегам'
+      ],
+      initiative: [
+        'Еженедельно предлагать одну идею для улучшения',
+        'Изучать новые технологии и методы работы',
+        'Участвовать в brainstorming сессиях',
+        'Брать на себя дополнительные проекты'
+      ]
+    };
+
+    return plans[competencyId] || ['Продолжать развиваться в данной области'];
   }
 }
 

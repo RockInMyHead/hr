@@ -174,6 +174,16 @@ export function UnifiedAIInterview({ user, onBack, onComplete }: UnifiedAIInterv
     setIsLoading(true);
     
     try {
+      // Принудительно очищаем любые предыдущие данные сессий
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.includes('unified') || key.includes('interview') || key.includes('chat-session'))) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+      
       // Создаем новую сессию
       const newSession = await unifiedInterviewService.createSession(
         user.email || user.name,

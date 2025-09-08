@@ -4,16 +4,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Award, 
-  TrendingUp, 
-  Target, 
-  Lightbulb, 
+import {
+  Award,
+  TrendingUp,
+  Target,
+  Lightbulb,
   ArrowLeft,
   Star,
   CheckCircle,
   Circle,
-  Info
+  Info,
+  RefreshCw,
+  Calendar
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { AppUser } from '@/types/profile';
@@ -38,15 +40,49 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'detailed' | 'development'>('overview');
   const [userCompetencies, setUserCompetencies] = useState<UserCompetencyData[]>([]);
   const [selectedCompetency, setSelectedCompetency] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Загрузка данных о компетенциях пользователя
   useEffect(() => {
+    loadCompetencyData();
+  }, [user.email]);
+
+  const loadCompetencyData = async () => {
     try {
-      // Получаем данные из employees
+      // Сначала пытаемся загрузить данные из API (результаты интервью)
+      try {
+        const userIdentifier = user.email || user.name || 'anonymous';
+        const paramName = userIdentifier.includes('@') ? 'email' : 'userId';
+        const response = await fetch(`/api/competency-assessments/latest?${paramName}=${encodeURIComponent(userIdentifier)}`);
+        if (response.ok) {
+          const apiAssessments = await response.json();
+
+          if (apiAssessments && apiAssessments.length > 0) {
+            const competencies: UserCompetencyData[] = apiAssessments.map((assessment: any) => ({
+              competencyId: assessment.competencyId,
+              currentValue: assessment.currentValue,
+              targetValue: assessment.targetValue,
+              category: assessment.category || STANDARD_COMPETENCIES[assessment.competencyId]?.category || 'soft',
+              lastAssessed: new Date(assessment.lastAssessed),
+              improvementPlan: assessment.improvementPlan ? JSON.parse(assessment.improvementPlan) : generateImprovementPlan(assessment.competencyId, assessment.currentValue)
+            }));
+
+            setUserCompetencies(competencies);
+            setLastUpdated(new Date());
+            console.log('Loaded competency data from API:', competencies.length, 'assessments');
+            return;
+          }
+        }
+      } catch (apiError) {
+        console.warn('Failed to load competency data from API, falling back to localStorage:', apiError);
+      }
+
+      // Fallback: получаем данные из localStorage (employees)
       const raw = localStorage.getItem('hr-employees');
       const employees: Employee[] = raw ? JSON.parse(raw) : [];
       const currentEmployee = employees.find(emp => emp.email === user.email);
-      
+
       if (currentEmployee && currentEmployee.ratings) {
         const competencies: UserCompetencyData[] = Object.entries(currentEmployee.ratings).map(([key, value]) => ({
           competencyId: key,
@@ -56,13 +92,29 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
           lastAssessed: new Date(), // В реальной системе это была бы дата последней оценки
           improvementPlan: generateImprovementPlan(key, value)
         }));
-        
+
         setUserCompetencies(competencies);
+        setLastUpdated(new Date());
+        console.log('Loaded competency data from localStorage:', competencies.length, 'assessments');
+      } else {
+        // Если данных нет, пользователь еще не проходил оценку компетенций
+        console.log('No competency data found - user has not completed any assessments');
+        setUserCompetencies([]);
+        setLastUpdated(null);
       }
     } catch (error) {
       console.error('Error loading competency data:', error);
+      // В случае ошибки создаем минимальные данные
+      setUserCompetencies([]);
     }
-  }, [user.email]);
+  };
+
+  // Функция обновления данных
+  const refreshData = async () => {
+    setIsLoading(true);
+    await loadCompetencyData();
+    setIsLoading(false);
+  };
 
   // Генерация плана развития на основе текущего уровня
   const generateImprovementPlan = (competencyId: string, currentValue: number): string[] => {
@@ -152,10 +204,31 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
             </Button>
             <div>
               <h1 className="text-3xl font-bold text-white">Мои компетенции</h1>
-              <p className="text-gray-400 text-sm">Профиль развития и достижений</p>
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <span>Профиль развития и достижений</span>
+                {lastUpdated && (
+                  <>
+                    <span>•</span>
+                    <div className="flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      <span>Обновлено: {lastUpdated.toLocaleDateString('ru-RU')} {lastUpdated.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              onClick={refreshData}
+              disabled={isLoading}
+              variant="outline"
+              size="sm"
+              className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              {isLoading ? 'Обновление...' : 'Обновить'}
+            </Button>
             <Badge className={getCompetencyColor(overallScore)}>
               <Award className="h-4 w-4 mr-1" />
               {overallScore.toFixed(1)} / 5.0
@@ -258,10 +331,21 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
                 </Card>
               ))}
             </div>
+              </>
+            )}
           </TabsContent>
 
           {/* Детальный просмотр */}
           <TabsContent value="detailed" className="space-y-6">
+            {userCompetencies.length === 0 ? (
+              <Card className="bg-white/5 border-white/10 text-white">
+                <CardContent className="pt-6">
+                  <p className="text-gray-300 text-center">
+                    Нет данных о компетенциях для детального обзора.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
             <div className="grid gap-6">
               {userCompetencies.map((comp) => {
                 const competency = STANDARD_COMPETENCIES[comp.competencyId];
@@ -379,10 +463,20 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
                 );
               })}
             </div>
+            )}
           </TabsContent>
 
           {/* План развития */}
           <TabsContent value="development" className="space-y-6">
+            {userCompetencies.length === 0 ? (
+              <Card className="bg-white/5 border-white/10 text-white">
+                <CardContent className="pt-6">
+                  <p className="text-gray-300 text-center">
+                    План развития будет доступен после оценки компетенций.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
             <Card className="bg-white/5 border-white/10 text-white">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -425,6 +519,7 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
                 </div>
               </CardContent>
             </Card>
+            )}
           </TabsContent>
         </Tabs>
       </div>

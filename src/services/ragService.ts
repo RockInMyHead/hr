@@ -121,6 +121,37 @@ class RAGService {
         timestamp: Date.now()
       });
 
+      // Если это первое сообщение (приветствие), генерируем приветствие
+      if (this.conversationHistory.length === 1 && userMessage.includes('готов к собеседованию')) {
+        const welcomePrompt = `Сгенерируй приветственное сообщение для начала RAG-интервью.
+
+ЗАДАЧА:
+- Поприветствуй кандидата дружелюбно
+- Объясни формат беседы как неформальную дружескую беседу
+- Подчеркни, что это не допрос
+- Задай первый простой вопрос о хобби/увлечениях
+
+СТИЛЬ:
+- Дружелюбный и располагающий
+- Используй "ты"
+- Создай позитивную атмосферу
+
+Верни только текст приветствия.`;
+
+        const welcomeMessage = await this.callOpenAI([
+          { role: 'system', content: welcomePrompt }
+        ], 'gpt-4o-mini');
+        
+        // Добавляем ответ в историю
+        this.conversationHistory.push({
+          role: 'assistant',
+          content: welcomeMessage,
+          timestamp: Date.now()
+        });
+        
+        return welcomeMessage;
+      }
+
       // Находим релевантные вопросы
       const relevantQuestions = this.findRelevantQuestions(userMessage, difficulty);
       

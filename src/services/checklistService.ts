@@ -108,6 +108,41 @@ class ChecklistService {
     return this.currentSession;
   }
 
+  // Генерация адаптивного вопроса по теме
+  async generateAdaptiveQuestion(topic: string, difficulty: string, questionType: string): Promise<string> {
+    try {
+      const prompt = `Сгенерируй вопрос для оценки компетенций сотрудника по теме "${topic}".
+
+УРОВЕНЬ СЛОЖНОСТИ: ${difficulty}
+ТИП ВОПРОСА: ${questionType}
+
+ЗАДАЧА:
+Создай открытый вопрос, который поможет оценить компетенции в данной области.
+Вопрос должен:
+- Быть естественным и неформальным
+- Провоцировать детальный ответ
+- Раскрывать поведенческие паттерны
+- Быть релевантным для профессиональной среды
+
+Примеры вопросов:
+- Для коммуникации: "Расскажите о ситуации, когда вам приходилось объяснять сложную тему не-специалисту?"
+- Для лидерства: "Опишите, как вы мотивируете команду для достижения целей?"
+- Для решения проблем: "Приведите пример сложной проблемы, которую вам удалось решить?"
+
+Верни только текст вопроса без дополнительных объяснений.`;
+
+      const messages = [
+        { role: 'system', content: prompt }
+      ];
+
+      const response = await this.callOpenAI(messages, 'gpt-4o-mini');
+      return response.trim();
+    } catch (error) {
+      console.error('Error generating adaptive question:', error);
+      return `Расскажите подробнее о вашем опыте в области ${topic}.`;
+    }
+  }
+
   // Получить следующий адаптивный вопрос
   async getNextAdaptiveQuestion(session: AssessmentSession): Promise<AdaptiveQuestion> {
     try {
@@ -353,6 +388,67 @@ ${Object.entries(session.competencyScores).map(([comp, score]) => `${comp}: ${sc
         developmentAreas: [],
         recommendations: [],
         overallAssessment: 'Ошибка при генерации отчета'
+      };
+    }
+  }
+
+  // Анализ ответа для 360° оценки
+  async analyze360Response(userMessage: string): Promise<{ scores: Record<string, number>; observation: string }> {
+    try {
+      const prompt = `Проанализируй ответ кандидата с точки зрения 360-градусной оценки.
+
+ОТВЕТ КАНДИДАТА: "${userMessage}"
+
+ЗАДАЧА:
+Оцени ответ по шкале 1-5 по следующим критериям:
+- teamwork (командная работа): умение работать в коллективе
+- communication (коммуникация): навыки общения и взаимодействия
+- leadership (лидерство): проявление лидерских качеств
+- adaptability (адаптивность): гибкость и способность к изменениям
+- collaboration (сотрудничество): готовность помогать коллегам
+
+Также сформулируй краткое наблюдение о поведенческих особенностях кандидата.
+
+Верни JSON:
+{
+  "scores": {
+    "teamwork": 3,
+    "communication": 4,
+    "leadership": 2,
+    "adaptability": 3,
+    "collaboration": 4
+  },
+  "observation": "Краткое наблюдение о поведении кандидата"
+}`;
+
+      const messages = [
+        { role: 'system', content: prompt }
+      ];
+
+      const response = await this.callOpenAI(messages, 'gpt-4o-mini');
+      const result = JSON.parse(response);
+
+      return {
+        scores: result.scores || {
+          teamwork: 3,
+          communication: 3,
+          leadership: 3,
+          adaptability: 3,
+          collaboration: 3
+        },
+        observation: result.observation || 'Наблюдение проведено'
+      };
+    } catch (error) {
+      console.error('Error analyzing 360 response:', error);
+      return {
+        scores: {
+          teamwork: 3,
+          communication: 3,
+          leadership: 3,
+          adaptability: 3,
+          collaboration: 3
+        },
+        observation: 'Ошибка при анализе ответа'
       };
     }
   }

@@ -199,7 +199,7 @@ const Index = () => {
   if (currentView === "chat" && user) {
     return (
       <div className="min-h-screen bg-black text-white">
-        <HRChat onExit={handleBackToProfile} />
+        <HRChat onExit={handleBackToProfile} user={user} />
       </div>
     );
   }

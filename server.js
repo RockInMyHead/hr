@@ -151,6 +151,23 @@ db.exec(`
         lastLoginAt INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS competency_assessments (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        sessionId TEXT,
+        competencyId TEXT NOT NULL,
+        currentValue REAL NOT NULL,
+        targetValue REAL,
+        category TEXT NOT NULL,
+        lastAssessed INTEGER NOT NULL,
+        improvementPlan TEXT,
+        source TEXT NOT NULL DEFAULT 'interview', -- 'interview', 'manual', 'self-assessment'
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        FOREIGN KEY (userId) REFERENCES users (id),
+        FOREIGN KEY (sessionId) REFERENCES chat_sessions (id) ON DELETE SET NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(sessionId);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp);
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(userId);
@@ -159,6 +176,9 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_candidate_profiles_user ON candidate_profiles(userId);
     CREATE INDEX IF NOT EXISTS idx_knowledge_base_category ON knowledge_base(category);
     CREATE INDEX IF NOT EXISTS idx_knowledge_base_difficulty ON knowledge_base(difficulty);
+    CREATE INDEX IF NOT EXISTS idx_competency_assessments_user ON competency_assessments(userId);
+    CREATE INDEX IF NOT EXISTS idx_competency_assessments_session ON competency_assessments(sessionId);
+    CREATE INDEX IF NOT EXISTS idx_competency_assessments_competency ON competency_assessments(competencyId);
 `);
 
 // ===== CHAT SESSIONS API =====
@@ -425,6 +445,208 @@ app.put('/api/candidate-profiles/:profileId', (req, res) => {
 
         if (result.changes === 0) {
             return res.status(404).json({ error: 'Profile not found' });
+        }
+
+        res.json({ ok: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ===== COMPETENCY ASSESSMENTS API =====
+
+// Get competency assessments for user
+app.get('/api/competency-assessments', (req, res) => {
+    try {
+        const userIdOrEmail = String(req.query.userId || req.query.email || 'anonymous');
+        const sessionId = req.query.sessionId;
+
+        // Сначала попробуем найти пользователя по email, если передан email
+        let userId = userIdOrEmail;
+        if (userIdOrEmail.includes('@')) {
+            const userStmt = db.prepare('SELECT id FROM users WHERE email = ?');
+            const user = userStmt.get(userIdOrEmail);
+            if (user) {
+                userId = user.id;
+            }
+        }
+
+        let query = 'SELECT * FROM competency_assessments WHERE userId = ?';
+        let params = [userId];
+
+        if (sessionId) {
+            query += ' AND sessionId = ?';
+            params.push(sessionId);
+        }
+
+        query += ' ORDER BY lastAssessed DESC';
+
+        const stmt = db.prepare(query);
+        const assessments = stmt.all(...params);
+
+        // Group by competency
+        const grouped = assessments.reduce((acc, assessment) => {
+            if (!acc[assessment.competencyId]) {
+                acc[assessment.competencyId] = [];
+            }
+            acc[assessment.competencyId].push(assessment);
+            return acc;
+        }, {});
+
+        res.json(grouped);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get latest competency assessment for user
+app.get('/api/competency-assessments/latest', (req, res) => {
+    try {
+        const userIdOrEmail = String(req.query.userId || req.query.email || 'anonymous');
+
+        // Сначала попробуем найти пользователя по email, если передан email
+        let userId = userIdOrEmail;
+        if (userIdOrEmail.includes('@')) {
+            const userStmt = db.prepare('SELECT id FROM users WHERE email = ?');
+            const user = userStmt.get(userIdOrEmail);
+            if (user) {
+                userId = user.id;
+            }
+        }
+
+        const stmt = db.prepare(`
+            SELECT ca.* FROM competency_assessments ca
+            INNER JOIN (
+                SELECT competencyId, MAX(lastAssessed) as latest
+                FROM competency_assessments
+                WHERE userId = ?
+                GROUP BY competencyId
+            ) latest ON ca.competencyId = latest.competencyId AND ca.lastAssessed = latest.latest
+            WHERE ca.userId = ?
+            ORDER BY ca.lastAssessed DESC
+        `);
+
+        const assessments = stmt.all(userId, userId);
+        res.json(assessments);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Save competency assessments from interview
+app.post('/api/competency-assessments/bulk', (req, res) => {
+    try {
+        const { userId, email, sessionId, assessments, source = 'interview' } = req.body;
+        let actualUserId = userId;
+
+        // Если передан email вместо userId, найдем пользователя по email
+        if (!userId && email) {
+            const userStmt = db.prepare('SELECT id FROM users WHERE email = ?');
+            const user = userStmt.get(email);
+            if (user) {
+                actualUserId = user.id;
+            } else {
+                // Создаем нового пользователя если не найден
+                const newUserId = `user-${Date.now()}`;
+                const createUserStmt = db.prepare('INSERT INTO users (id, name, email, role, createdAt) VALUES (?, ?, ?, ?, ?)');
+                createUserStmt.run(newUserId, email.split('@')[0], email, 'subordinate', Date.now());
+                actualUserId = newUserId;
+            }
+        }
+
+        if ((!actualUserId && !email) || !assessments || !Array.isArray(assessments)) {
+            return res.status(400).json({ error: 'Invalid request data' });
+        }
+
+        const now = Date.now();
+        const savedAssessments = [];
+
+        for (const assessment of assessments) {
+            const id = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+            const stmt = db.prepare(`
+                INSERT INTO competency_assessments (
+                    id, userId, sessionId, competencyId, currentValue, targetValue,
+                    category, lastAssessed, improvementPlan, source, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+
+            stmt.run(
+                id,
+                actualUserId,
+                sessionId || null,
+                assessment.competencyId,
+                assessment.currentValue,
+                assessment.targetValue || null,
+                assessment.category || 'soft',
+                assessment.lastAssessed || now,
+                assessment.improvementPlan ? JSON.stringify(assessment.improvementPlan) : null,
+                source,
+                now,
+                now
+            );
+
+            savedAssessments.push({
+                id,
+                ...assessment,
+                createdAt: now,
+                updatedAt: now
+            });
+        }
+
+        res.json({
+            success: true,
+            saved: savedAssessments.length,
+            assessments: savedAssessments
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Update competency assessment
+app.put('/api/competency-assessments/:assessmentId', (req, res) => {
+    try {
+        const { assessmentId } = req.params;
+        const updates = req.body;
+
+        const fields = Object.keys(updates).filter(key => !['id', 'createdAt'].includes(key));
+        if (fields.length === 0) {
+            return res.status(400).json({ error: 'No fields to update' });
+        }
+
+        fields.push('updatedAt');
+        const setClause = fields.map(field => `${field} = ?`).join(', ');
+        const values = fields.map(field => {
+            if (field === 'updatedAt') return Date.now();
+            if (field === 'improvementPlan' && updates[field]) {
+                return JSON.stringify(updates[field]);
+            }
+            return updates[field];
+        });
+
+        const stmt = db.prepare(`UPDATE competency_assessments SET ${setClause} WHERE id = ?`);
+        const result = stmt.run(...values, assessmentId);
+
+        if (result.changes === 0) {
+            return res.status(404).json({ error: 'Assessment not found' });
+        }
+
+        res.json({ ok: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Delete competency assessment
+app.delete('/api/competency-assessments/:assessmentId', (req, res) => {
+    try {
+        const { assessmentId } = req.params;
+        const stmt = db.prepare('DELETE FROM competency_assessments WHERE id = ?');
+        const result = stmt.run(assessmentId);
+
+        if (result.changes === 0) {
+            return res.status(404).json({ error: 'Assessment not found' });
         }
 
         res.json({ ok: true });

@@ -4,20 +4,12 @@ import ChatInput from "./ChatInput";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RefreshCw, MessageCircle, ArrowLeft } from "lucide-react";
-import { UserProfile, Message, MessageType } from "@/types/profile";
+import { UserProfile, Message, MessageType, AppUser } from "@/types/profile";
 import ChatProgressBar from "./ChatProgressBar";
 import { API_CONFIG } from "../config/api";
 
-const HRChat = ({ onExit }: { onExit: () => void }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      text: "Добро пожаловать! Я HR-ассистент. Давайте начнем наше интервью. Расскажите немного о себе и своем опыте работы. Как вас зовут и какую должность вы занимаете?",
-      isUser: false,
-      timestamp: new Date(),
-      type: 'text',
-    },
-  ]);
+const HRChat = ({ onExit, user }: { onExit: () => void; user: AppUser }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile>({});
   const [conversationHistory, setConversationHistory] = useState<string>("");
@@ -31,7 +23,7 @@ const HRChat = ({ onExit }: { onExit: () => void }) => {
     scrollToBottom();
   }, [messages]);
 
-  // Загрузка профиля из localStorage при инициализации
+  // Загрузка профиля из localStorage при инициализации и генерация приветствия
   useEffect(() => {
     try {
       const savedProfile = localStorage.getItem('hr-chat-profile');
@@ -42,11 +34,71 @@ const HRChat = ({ onExit }: { onExit: () => void }) => {
     } catch (error) {
       console.warn('Failed to load profile from localStorage:', error);
     }
+
+    // Генерируем приветственное сообщение при загрузке
+    generateWelcomeMessage().then(welcomeText => {
+      setMessages([
+        {
+          id: "1",
+          text: welcomeText,
+          isUser: false,
+          timestamp: new Date(),
+          type: 'text',
+        },
+      ]);
+    });
   }, []);
 
   const OPENAI_MODEL = String(
     import.meta.env.VITE_OPENAI_MODEL || 'gpt-4o-mini'
   );
+
+  // Генерация приветственного сообщения
+  const generateWelcomeMessage = async (): Promise<string> => {
+    const prompt = `Сгенерируй приветственное сообщение для начала HR интервью.
+
+КОНТЕКСТ:
+- Пользователь: ${user.email}
+- Это начало дружеской беседы-интервью
+
+ЗАДАЧА:
+Создай дружелюбное приветствие, которое:
+- Поприветствует кандидата по email
+- Объяснит формат интервью как дружескую беседу
+- Подчеркнет, что это не допрос
+- Задаст первый простой вопрос о хобби/увлечениях
+
+СТИЛЬ:
+- Профессиональный, но дружелюбный
+- Располагающий к открытой беседе
+- Используй "ты"
+
+Верни только текст приветствия.`;
+
+    try {
+      const response = await fetch(API_CONFIG.openaiURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: OPENAI_MODEL,
+          messages: [{ role: 'system', content: prompt }],
+          max_tokens: 500,
+          temperature: 0.7
+        })
+      });
+
+      const data = await response.json();
+      if (data.choices && data.choices[0]) {
+        return data.choices[0].message.content;
+      }
+    } catch (error) {
+      console.error('Error generating welcome message:', error);
+    }
+
+    return `Привет, ${user.email}! Рад видеть тебя сегодня. Давайте проведем дружескую беседу о вашем опыте. Расскажите, чем увлекаетесь в свободное время?`;
+  };
 
   // Удаляем Markdown-выделения из текста, показываемого пользователю
   const sanitizeText = (text: string): string => {
@@ -174,7 +226,7 @@ ${conversationHistory}
       if (data.error) {
         console.error('Ошибка OpenAI API:', data.error);
         return {
-          question: generateFallbackQuestion(userResponse),
+          question: await generateFallbackQuestion(userResponse),
           analysis: "Получена информация о кандидате."
         };
       }
@@ -197,7 +249,7 @@ ${conversationHistory}
           const analysisLine = lines.find(line => line.toLowerCase().includes('анализ:'));
 
           return {
-            question: questionLine ? questionLine.replace(/вопрос:\s*/i, '').trim() : generateFallbackQuestion(userResponse),
+            question: questionLine ? questionLine.replace(/вопрос:\s*/i, '').trim() : await generateFallbackQuestion(userResponse),
             analysis: analysisLine ? analysisLine.replace(/анализ:\s*/i, '').trim() : "Получена информация о кандидате."
           };
         }
@@ -206,36 +258,56 @@ ${conversationHistory}
       }
 
       return {
-        question: sanitizeText(generateFallbackQuestion(userResponse)),
+        question: sanitizeText(await generateFallbackQuestion(userResponse)),
         analysis: "Получена информация о кандидате."
       };
     } catch (error) {
       console.error('Ошибка при обращении к OpenAI API:', error);
       return {
-        question: sanitizeText(generateFallbackQuestion(userResponse)),
+        question: sanitizeText(await generateFallbackQuestion(userResponse)),
         analysis: "Получена информация о кандидате."
       };
     }
   };
 
-  const generateFallbackQuestion = (userResponse: string): string => {
-    // Генерируем вопрос на основе ключевых слов в ответе пользователя
-    const response = userResponse.toLowerCase();
+  const generateFallbackQuestion = async (userResponse: string): Promise<string> => {
+    const prompt = `Сгенерируй следующий вопрос для HR-интервью на основе ответа кандидата.
 
-    if (response.includes('программист') || response.includes('разработчик')) {
-      return "Какие технологии и языки программирования вы используете в работе?";
-    }
+ОТВЕТ КАНДИДАТА: "${userResponse}"
 
-    if (response.includes('опыт') || response.includes('работал') || response.includes('лет')) {
-      return "Расскажите о ваших самых значимых проектах и достижениях.";
-    }
+ЗАДАЧА:
+- Проанализируй ответ кандидата
+- Задай логичный follow-up вопрос
+- Сфокусируйся на профессиональном опыте, технологиях или достижениях
+- Покажи интерес к деталям
 
-    if (response.includes('преподавал') || response.includes('университет')) {
-      return "Какой опыт у вас в обучении и передаче знаний?";
-    }
+СТИЛЬ:
+- Дружелюбный и профессиональный
+- Открытый вопрос, провоцирующий детальный ответ
+- Используй "вы"
 
-    if (response.includes('газпром') || response.includes('обер')) {
-      return "Какие задачи вы решали в этих компаниях?";
+Верни только текст вопроса.`;
+
+    try {
+      const response = await fetch(API_CONFIG.openaiURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: OPENAI_MODEL,
+          messages: [{ role: 'system', content: prompt }],
+          max_tokens: 500,
+          temperature: 0.7
+        })
+      });
+
+      const data = await response.json();
+      if (data.choices && data.choices[0]) {
+        return data.choices[0].message.content;
+      }
+    } catch (error) {
+      console.error('Error generating fallback question:', error);
     }
 
     return "Расскажите подробнее о ваших профессиональных целях и планах развития.";
@@ -293,7 +365,7 @@ ${conversationHistory}
   };
 
   // Функция для обновления оценок компетенций на основе анализа
-  const updateCompetencyRatings = (analysis: string, userResponse: string) => {
+  const updateCompetencyRatings = async (analysis: string, userResponse: string) => {
     try {
       // Получаем текущие оценки компетенций
       const currentRatings = JSON.parse(localStorage.getItem(`competency-data-${user.email}`) || '[]');
@@ -301,12 +373,56 @@ ${conversationHistory}
       // Анализируем ответ пользователя и обновляем оценки
       const updatedRatings = analyzeAndUpdateRatings(analysis, userResponse, currentRatings);
 
-      // Сохраняем обновленные оценки
+      // Сохраняем обновленные оценки локально
       localStorage.setItem(`competency-data-${user.email}`, JSON.stringify(updatedRatings));
+
+      // Сохраняем в базе данных
+      await saveCompetenciesToDatabase(updatedRatings);
 
       console.log('Оценки компетенций обновлены:', updatedRatings);
     } catch (error) {
       console.error('Ошибка при обновлении оценок компетенций:', error);
+    }
+  };
+
+  // Сохранение компетенций в базу данных
+  const saveCompetenciesToDatabase = async (competencyRatings: any[]) => {
+    try {
+      // Подготавливаем данные для сохранения
+      const assessments = competencyRatings.map((rating) => ({
+        competencyId: rating.competencyId,
+        currentValue: rating.currentValue,
+        targetValue: rating.targetValue || 5,
+        category: rating.category,
+        lastAssessed: Date.now(),
+        improvementPlan: rating.improvementPlan?.join('; ') || null,
+        source: 'interview'
+      }));
+
+      if (assessments.length === 0) return;
+
+      // Отправляем данные на сервер
+      const response = await fetch('/api/competency-assessments/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+          sessionId: null, // Это общий чат, не привязанный к конкретной сессии
+          assessments,
+          source: 'chat'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save competencies');
+      }
+
+      console.log('Competencies saved to database successfully');
+    } catch (error) {
+      console.error('Error saving competencies to database:', error);
     }
   };
 
@@ -619,15 +735,18 @@ ${conversationHistory}
   };
 
   const resetChat = () => {
-    setMessages([
-      {
-        id: "1",
-        text: "Добро пожаловать! Я HR-ассистент. Давайте начнем наше интервью. Расскажите немного о себе и своем опыте работы. Как вас зовут и какую должность вы занимаете?",
-        isUser: false,
-        timestamp: new Date(),
-        type: 'text',
-      },
-    ]);
+    // Генерируем приветственное сообщение
+    generateWelcomeMessage().then(welcomeText => {
+      setMessages([
+        {
+          id: "1",
+          text: welcomeText,
+          isUser: false,
+          timestamp: new Date(),
+          type: 'text',
+        },
+      ]);
+    });
     setUserProfile({});
     setConversationHistory("");
 

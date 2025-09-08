@@ -169,6 +169,9 @@ export function AIAssessmentDialog({ user, checklist, onBack, onComplete }: AIAs
     try {
       const report = await checklistService.generateFinalReport(finalSession);
 
+      // Сохраняем компетенции в базу данных
+      await saveCompetenciesToDatabase(finalSession, report.competencyScores);
+
       const completionMessage: Message = {
         id: `completion-${Date.now()}`,
         role: 'ai',
@@ -180,7 +183,7 @@ ${report.overallAssessment}
 • Оценено компетенций: ${Object.keys(report.competencyScores).length}
 • Средний балл: ${Math.round(Object.values(report.competencyScores).reduce((a, b) => a + b, 0) / Object.values(report.competencyScores).length)}/100
 
-Спасибо за участие в оценке! Результаты сохранены.`,
+Ваши компетенции сохранены в разделе "Мои компетенции"!`,
         timestamp: new Date()
       };
 
@@ -195,6 +198,71 @@ ${report.overallAssessment}
       }
     } catch (error) {
       console.error('Error completing assessment:', error);
+    }
+  };
+
+  // Сохранение компетенций в базу данных
+  const saveCompetenciesToDatabase = async (session: AssessmentSession, competencyScores: Record<string, number>) => {
+    try {
+      // Подготавливаем данные для сохранения
+      const assessments = Object.entries(competencyScores).map(([competencyId, score]) => {
+        // Приводим компетенцию к стандартному формату
+        const competencyMapping: Record<string, string> = {
+          'Коммуникация': 'communication',
+          'Лидерство': 'leadership',
+          'Продуктивность': 'productivity',
+          'Надежность': 'reliability',
+          'Инициативность': 'initiative',
+          'Техническая экспертиза': 'technical_expertise',
+          'Решение проблем': 'problem_solving',
+          'Командная работа': 'teamwork',
+          'Адаптивность': 'adaptability',
+          'Эмоциональный интеллект': 'emotional_intelligence'
+        };
+
+        const standardCompetencyId = competencyMapping[competencyId] || competencyId.toLowerCase().replace(/\s+/g, '_');
+        
+        // Определяем категорию компетенции
+        const getCompetencyCategory = (id: string): string => {
+          if (['technical_expertise'].includes(id)) return 'technical';
+          if (['leadership'].includes(id)) return 'leadership';
+          if (['productivity'].includes(id)) return 'business';
+          return 'soft';
+        };
+
+        return {
+          competencyId: standardCompetencyId,
+          currentValue: Math.min(5, Math.max(1, Math.round(score / 20))), // Конвертируем 0-100 в 1-5
+          targetValue: 5,
+          category: getCompetencyCategory(standardCompetencyId),
+          lastAssessed: Date.now(),
+          improvementPlan: null,
+          source: 'interview'
+        };
+      });
+
+      // Отправляем данные на сервер
+      const response = await fetch('/api/competency-assessments/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+          sessionId: session.sessionId,
+          assessments,
+          source: 'interview'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save competencies');
+      }
+
+      console.log('Competencies saved successfully');
+    } catch (error) {
+      console.error('Error saving competencies:', error);
     }
   };
 
@@ -416,4 +484,5 @@ ${report.overallAssessment}
     </div>
   );
 }
+
 

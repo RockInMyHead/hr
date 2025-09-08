@@ -20,6 +20,7 @@ import {
 import RAGService, { ChatMessage, CandidateProfile, KnowledgeItem } from '../services/ragService';
 import { chatService, ChatService } from '../services/chatService';
 import type { AppUser } from '@/types/profile';
+import { API_CONFIG } from '../config/api';
 
 interface RAGChatInterfaceProps {
   user: AppUser;
@@ -55,14 +56,18 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
   }, [user]);
 
   const initializeSession = async () => {
+    console.log('RAG: Initializing session for user:', user.email);
     try {
       // Попытка восстановить активную сессию
       const restoredSession = await chatService.restoreSessionFromStorage(user);
+      console.log('RAG: Restored session:', restoredSession?.id || 'none');
       
       if (restoredSession) {
+        console.log('RAG: Using existing session:', restoredSession.id);
         setCurrentSessionId(restoredSession.id);
         // Загружаем сообщения из базы данных
         const savedMessages = await chatService.getSessionMessages(restoredSession.id);
+        console.log('RAG: Loaded messages from DB:', savedMessages.length);
         setMessages(savedMessages);
         setMessageCount(savedMessages.filter(m => m.role === 'user').length);
         setSessionStarted(true);
@@ -70,19 +75,22 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
         // Загружаем профиль если есть
         const profile = await chatService.getCandidateProfile(restoredSession.id);
         if (profile) {
+          console.log('RAG: Loaded profile with score:', profile.overallScore);
           setCurrentProfile(profile);
         }
       } else {
+        console.log('RAG: Creating new session');
         // Создаем новую сессию
         await startNewSession();
       }
     } catch (error) {
-      console.error('Session initialization error:', error);
+      console.error('RAG Session initialization error:', error);
       await startNewSession();
     }
   };
 
   const startNewSession = async () => {
+    console.log('RAG: Starting new session...');
     setSessionStarted(true);
     setIsLoading(true);
 
@@ -93,14 +101,14 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
         sessionType: 'rag-chat',
         metadata: { difficulty: 'middle' }
       });
+      console.log('RAG: Created new session:', session.id);
 
       setCurrentSessionId(session.id);
       chatService.saveSessionToStorage(user, session.id);
+      console.log('RAG: Session saved to localStorage');
 
-      const welcomeMessage = await ragService.conductInterview(
-        `Привет! Меня зовут ${user.name}, готов к собеседованию.`,
-        'middle'
-      );
+      // Генерируем приветственное сообщение через AI
+      const welcomeMessage = await generateWelcomeMessage(user);
 
       // Добавляем приветственное сообщение в базу данных
       const dbMessage = await chatService.addMessage(session.id, {
@@ -113,11 +121,8 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
     } catch (error) {
       console.error('Session start error:', error);
       
-      const fallbackMessage = `Добро пожаловать в AI собеседование с RAG, ${user.name}! 🤖
-
-Я использую передовую технологию RAG (Retrieval Augmented Generation) для проведения интеллектуальных собеседований. 
-
-Расскажите немного о себе: ваш опыт работы, навыки и что вас интересует в профессиональном развитии?`;
+      // Генерируем fallback приветственное сообщение
+      const fallbackMessage = await generateWelcomeMessage(user);
 
       if (currentSessionId) {
         const dbMessage = await chatService.addMessage(currentSessionId, {
@@ -140,6 +145,53 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
     }
   };
 
+  // Генерация приветственного сообщения
+  const generateWelcomeMessage = async (user: AppUser): Promise<string> => {
+    const prompt = `Сгенерируй приветственное сообщение для начала RAG HR интервью.
+
+КОНТЕКСТ:
+- Пользователь: ${user.email}
+- Это RAG-интервью с использованием базы знаний
+
+ЗАДАЧА:
+Создай дружелюбное приветствие, которое:
+- Поприветствует кандидата по email
+- Объяснит формат интервью как дружескую беседу
+- Подчеркнет интеллектуальный подход с базой знаний
+- Задаст первый простой вопрос о хобби/увлечениях
+
+СТИЛЬ:
+- Профессиональный, но дружелюбный
+- Располагающий к открытой беседе
+- Используй "ты"
+
+Верни только текст приветствия.`;
+
+    try {
+      const response = await fetch(API_CONFIG.openaiURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'system', content: prompt }],
+          max_tokens: 500,
+          temperature: 0.7
+        })
+      });
+
+      const data = await response.json();
+      if (data.choices && data.choices[0]) {
+        return data.choices[0].message.content;
+      }
+    } catch (error) {
+      console.error('Error generating welcome message:', error);
+    }
+
+    return `Привет, ${user.email}! Рад видеть тебя сегодня. Проведем интеллектуальное интервью с использованием базы знаний. Расскажите, чем увлекаетесь в свободное время?`;
+  };
+
   const loadChatHistory = async () => {
     try {
       const history = await chatService.getUserChatHistory(user.email, 10);
@@ -150,7 +202,25 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
   };
 
   const sendMessage = async () => {
-    if (!inputMessage.trim() || isLoading || !currentSessionId) return;
+    if (!inputMessage.trim() || isLoading) {
+      console.log('RAG sendMessage blocked:', { 
+        hasMessage: !!inputMessage.trim(), 
+        isLoading, 
+        hasSessionId: !!currentSessionId 
+      });
+      return;
+    }
+
+    if (!currentSessionId) {
+      console.error('RAG: No active session ID, cannot send message');
+      alert('Ошибка: Нет активной сессии. Пожалуйста, перезагрузите страницу.');
+      return;
+    }
+
+    console.log('RAG sendMessage starting:', { 
+      sessionId: currentSessionId, 
+      messageLength: inputMessage.length 
+    });
 
     setIsLoading(true);
     const messageText = inputMessage;
@@ -158,24 +228,29 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
 
     try {
       // Сохраняем сообщение пользователя в базу данных
+      console.log('RAG: Saving user message to database...');
       const userMessage = await chatService.addMessage(currentSessionId, {
         role: 'user',
         content: messageText,
         messageType: 'text'
       });
+      console.log('RAG: User message saved:', userMessage.id);
 
       setMessages(prev => [...prev, userMessage]);
       setMessageCount(prev => prev + 1);
 
       // Получаем ответ от RAG
+      console.log('RAG: Getting response from RAG service...');
       const response = await ragService.conductInterview(messageText, 'middle');
       
       // Сохраняем ответ ассистента в базу данных
+      console.log('RAG: Saving assistant message to database...');
       const assistantMessage = await chatService.addMessage(currentSessionId, {
         role: 'assistant',
         content: response,
         messageType: 'text'
       });
+      console.log('RAG: Assistant message saved:', assistantMessage.id);
 
       setMessages(prev => [...prev, assistantMessage]);
       
@@ -201,19 +276,34 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
           individualDevelopmentPlan: JSON.stringify(updatedProfile.individualDevelopmentPlan || {})
         });
         setCurrentProfile(savedProfile);
+
+        // Сохраняем компетенции
+        await saveCompetenciesToDatabase(updatedProfile);
       }
 
     } catch (error) {
-      console.error('Send message error:', error);
+      console.error('RAG Send message error:', error);
       
-      // Сохраняем сообщение об ошибке
-      const errorMessage = await chatService.addMessage(currentSessionId, {
-        role: 'assistant',
-        content: 'Извините, произошла ошибка при обработке вашего ответа. Давайте продолжим - расскажите мне больше о вашем опыте работы.',
-        messageType: 'text'
-      });
-      
-      setMessages(prev => [...prev, errorMessage]);
+      try {
+        // Сохраняем сообщение об ошибке
+        const errorMessage = await chatService.addMessage(currentSessionId, {
+          role: 'assistant',
+          content: 'Извините, произошла ошибка при обработке вашего ответа. Давайте продолжим - расскажите мне больше о вашем опыте работы.',
+          messageType: 'text'
+        });
+        
+        setMessages(prev => [...prev, errorMessage]);
+      } catch (saveError) {
+        console.error('RAG Error saving error message:', saveError);
+        // Добавляем сообщение локально если не удалось сохранить в БД
+        setMessages(prev => [...prev, {
+          id: `temp-error-${Date.now()}`,
+          sessionId: currentSessionId,
+          role: 'assistant',
+          content: 'Извините, произошла ошибка. Попробуйте еще раз.',
+          timestamp: Date.now()
+        }]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -223,6 +313,81 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
+    }
+  };
+
+  // Сохранение компетенций в базу данных
+  const saveCompetenciesToDatabase = async (profile: any) => {
+    try {
+      if (!profile.softSkills && !profile.technicalSkills) return;
+
+      // Извлекаем компетенции из профиля
+      const softSkills = typeof profile.softSkills === 'string' 
+        ? JSON.parse(profile.softSkills) 
+        : profile.softSkills || [];
+      
+      const technicalSkills = typeof profile.technicalSkills === 'string'
+        ? JSON.parse(profile.technicalSkills)
+        : profile.technicalSkills || [];
+
+      const assessments = [];
+
+      // Добавляем soft skills
+      if (Array.isArray(softSkills)) {
+        softSkills.forEach(skill => {
+          if (typeof skill === 'string' && skill.length > 2) {
+            assessments.push({
+              competencyId: skill.toLowerCase().replace(/\s+/g, '_'),
+              currentValue: Math.min(5, Math.max(1, Math.round(profile.overallScore / 20) || 3)),
+              targetValue: 5,
+              category: 'soft',
+              lastAssessed: Date.now(),
+              source: 'rag_interview'
+            });
+          }
+        });
+      }
+
+      // Добавляем technical skills
+      if (Array.isArray(technicalSkills)) {
+        technicalSkills.forEach(skill => {
+          if (typeof skill === 'string' && skill.length > 2) {
+            assessments.push({
+              competencyId: skill.toLowerCase().replace(/\s+/g, '_'),
+              currentValue: Math.min(5, Math.max(1, Math.round(profile.overallScore / 20) || 3)),
+              targetValue: 5,
+              category: 'technical',
+              lastAssessed: Date.now(),
+              source: 'rag_interview'
+            });
+          }
+        });
+      }
+
+      if (assessments.length === 0) return;
+
+      // Отправляем данные на сервер
+      const response = await fetch('/api/competency-assessments/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+          sessionId: currentSessionId,
+          assessments,
+          source: 'rag_interview'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save competencies');
+      }
+
+      console.log('RAG competencies saved to database successfully');
+    } catch (error) {
+      console.error('Error saving RAG competencies to database:', error);
     }
   };
 

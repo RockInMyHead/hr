@@ -144,6 +144,8 @@ export class ChatService {
 
   // Добавление сообщения в чат
   async addMessage(sessionId: string, messageData: ChatMessageData): Promise<ChatMessage> {
+    console.log('ChatService: Adding message to session:', sessionId, 'role:', messageData.role);
+    
     const message = {
       sessionId,
       role: messageData.role,
@@ -154,17 +156,30 @@ export class ChatService {
       metadata: messageData.metadata ? JSON.stringify(messageData.metadata) : undefined
     };
 
+    console.log('ChatService: Sending message to API:', {
+      sessionId: message.sessionId,
+      role: message.role,
+      contentLength: message.content.length,
+      timestamp: message.timestamp
+    });
+
     const response = await fetch(`${this.apiBaseUrl}/chat-messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(message)
     });
 
+    console.log('ChatService: API response status:', response.status, response.statusText);
+
     if (!response.ok) {
-      throw new Error('Failed to add message');
+      const errorText = await response.text();
+      console.error('ChatService: Failed to add message. Response:', errorText);
+      throw new Error(`Failed to add message: ${response.status} ${response.statusText}`);
     }
 
-    return response.json();
+    const savedMessage = await response.json();
+    console.log('ChatService: Message saved successfully:', savedMessage.id);
+    return savedMessage;
   }
 
   // Добавление системного сообщения
@@ -353,15 +368,40 @@ export class ChatService {
   // Восстановление сессии из localStorage
   async restoreSessionFromStorage(user: AppUser): Promise<ChatSession | null> {
     try {
+      console.log('ChatService: Restoring session for user:', user.email);
       const savedSessionId = localStorage.getItem(`active-chat-session-${user.email}`);
+      console.log('ChatService: Found saved session ID:', savedSessionId);
+      
       if (savedSessionId) {
         const session = await this.loadSession(savedSessionId);
+        console.log('ChatService: Loaded session:', session?.id, 'status:', session?.status);
         if (session && session.status === 'active') {
+          console.log('ChatService: Using active session:', session.id);
           return session;
         }
       }
+      
+      // Для отладки: попробуем найти любую активную сессию для этого пользователя
+      if (user.email === 'jfff@mail.ru') {
+        console.log('ChatService: Special case for jfff@mail.ru - looking for existing session');
+        try {
+          const response = await fetch(`${this.apiBaseUrl}/chat-sessions?userId=${encodeURIComponent(user.email)}`);
+          if (response.ok) {
+            const sessions = await response.json();
+            const activeSession = sessions.find((s: ChatSession) => s.status === 'active');
+            if (activeSession) {
+              console.log('ChatService: Found existing active session:', activeSession.id);
+              // Сохраним в localStorage
+              this.saveSessionToStorage(user, activeSession.id);
+              return activeSession;
+            }
+          }
+        } catch (error) {
+          console.warn('ChatService: Failed to find existing session:', error);
+        }
+      }
     } catch (error) {
-      console.warn('Failed to restore session from storage:', error);
+      console.warn('ChatService: Failed to restore session from storage:', error);
     }
     return null;
   }

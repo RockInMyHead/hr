@@ -1,19 +1,22 @@
-import { API_CONFIG } from '../config/api';
-import type { CompetencyDefinition, CompetencyValue } from '../types/competencies';
+import { BaseService } from './baseService';
+import type { CompetencyDefinition } from '../types/competencies';
+import type { AIService, CompanyContext } from './types';
 
-export type CompetencyId = 'communication' | 'leadership' | 'productivity' | 'reliability' | 'initiative' | 'problem-solving' | 'teamwork' | 'adaptability' | 'innovation' | 'customer-focus';
+// Регистрируем сервис в менеджере
+import serviceManager from './serviceManager';
 
-export const COMPETENCY_IDS: CompetencyId[] = [
-  'communication', 'leadership', 'productivity', 'reliability', 'initiative',
-  'problem-solving', 'teamwork', 'adaptability', 'innovation', 'customer-focus'
-];
-
-export interface GeneratedCompetencyLevel {
-  value: number;
-  title: string;
-  description: string;
-  examples: string[];
-}
+// Определяем типы компетенций
+export type CompetencyId =
+  | 'communication'
+  | 'leadership'
+  | 'productivity'
+  | 'reliability'
+  | 'initiative'
+  | 'technical_expertise'
+  | 'problem_solving'
+  | 'teamwork'
+  | 'adaptability'
+  | 'emotional_intelligence';
 
 export interface GeneratedCompetencyDefinition {
   id: string;
@@ -21,177 +24,165 @@ export interface GeneratedCompetencyDefinition {
   description: string;
   category: 'technical' | 'soft' | 'leadership' | 'business';
   weight: number;
-  values: Record<number, GeneratedCompetencyLevel>;
+  values: Record<number, {
+    value: number;
+    title: string;
+    description: string;
+    examples: string[];
+  }>;
+  businessContext?: string;
+  reasoning?: string;
+  developmentSuggestions?: string[];
 }
 
-class CompetenciesService {
-  private cache: Map<CompetencyId, GeneratedCompetencyDefinition> = new Map();
-  private isGenerating: Set<CompetencyId> = new Set();
+export interface CompetenciesConfiguration {
+  industry: string;
+  companySize: 'startup' | 'small' | 'medium' | 'large' | 'enterprise';
+  organizationalStructure: 'hierarchical' | 'flat' | 'matrix';
+  competencies: GeneratedCompetencyDefinition[];
+  recommendations: string[];
+  assessmentGuidelines: string[];
+}
 
-  // Получить описание компетенции
-  async getCompetencyDefinition(competencyId: CompetencyId): Promise<GeneratedCompetencyDefinition> {
-    // Проверяем кеш
-    if (this.cache.has(competencyId)) {
-      return this.cache.get(competencyId)!;
-    }
+class CompetenciesService extends BaseService implements AIService {
+  private companyContext: CompanyContext | null = null;
 
-    // Проверяем, не генерируется ли уже
-    if (this.isGenerating.has(competencyId)) {
-      // Ждем завершения генерации
-      return new Promise((resolve) => {
-        const checkCache = () => {
-          if (this.cache.has(competencyId)) {
-            resolve(this.cache.get(competencyId)!);
-          } else {
-            setTimeout(checkCache, 100);
-          }
-        };
-        checkCache();
-      });
-    }
-
-    this.isGenerating.add(competencyId);
-
-    try {
-      const definition = await this.generateCompetencyDefinition(competencyId);
-      this.cache.set(competencyId, definition);
-      return definition;
-    } finally {
-      this.isGenerating.delete(competencyId);
-    }
+  constructor() {
+    super();
+    // Регистрируем сервис
+    serviceManager.registerService('competencies', this);
   }
 
-  // Генерировать определение компетенции через OpenAI
-  private async generateCompetencyDefinition(competencyId: CompetencyId): Promise<GeneratedCompetencyDefinition> {
+  public setCompanyContext(context: CompanyContext): void {
+    this.companyContext = context;
+  }
+
+  public getCompanyContext(): CompanyContext | null {
+    return this.companyContext;
+  }
+
+  // Получение определения конкретной компетенции
+  async getCompetencyDefinition(competencyId: CompetencyId): Promise<GeneratedCompetencyDefinition> {
+    const cacheKey = `competency_${competencyId}`;
+    const cached = this.getCache<GeneratedCompetencyDefinition>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    // Генерируем определение компетенции
+    const definition = await this.generateCompetencyDefinition(competencyId);
+
+    // Кешируем результат
+    this.setCache(cacheKey, definition);
+
+    return definition;
+  }
+
+  // Получение всех определений компетенций
+  async getAllCompetencyDefinitions(): Promise<Record<string, GeneratedCompetencyDefinition>> {
+    const cacheKey = 'all_competencies';
+    const cached = this.getCache<Record<string, GeneratedCompetencyDefinition>>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const standardIds: CompetencyId[] = [
+      'communication',
+      'leadership',
+      'productivity',
+      'reliability',
+      'initiative',
+      'technical_expertise',
+      'problem_solving',
+      'teamwork',
+      'adaptability',
+      'emotional_intelligence'
+    ];
+
+    const competencies: Record<string, GeneratedCompetencyDefinition> = {};
+
+    for (const id of standardIds) {
+      competencies[id] = await this.generateCompetencyDefinition(id);
+    }
+
+    // Кешируем результат
+    this.setCache(cacheKey, competencies);
+
+    return competencies;
+  }
+
+  // Генерация конфигурации компетенций для компании
+  async generateCompetenciesConfiguration(): Promise<CompetenciesConfiguration> {
+    if (!this.companyContext) {
+      throw new Error('Company context is required for competency configuration generation');
+    }
+
+    const cacheKey = 'competencies_config';
+    const cached = this.getCache<CompetenciesConfiguration>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     try {
-      const competencyNames: Record<CompetencyId, string> = {
-        'communication': 'Коммуникация',
-        'leadership': 'Лидерство',
-        'productivity': 'Продуктивность',
-        'reliability': 'Надежность',
-        'initiative': 'Инициативность',
-        'problem-solving': 'Решение проблем',
-        'teamwork': 'Командная работа',
-        'adaptability': 'Адаптивность',
-        'innovation': 'Инновационность',
-        'customer-focus': 'Ориентация на клиента'
+      // Для демо-версии возвращаем предопределенную конфигурацию
+      // В реальной версии здесь был бы AI для генерации кастомных компетенций
+      const config: CompetenciesConfiguration = {
+        industry: this.companyContext.industry || 'general',
+        companySize: this.companyContext.size || 'medium',
+        organizationalStructure: this.companyContext.structure || 'hierarchical',
+        competencies: await this.generateStandardCompetencies(),
+        recommendations: [
+          'Регулярно проводите оценку компетенций',
+          'Используйте компетенции для планирования развития',
+          'Свяжите компетенции с системой вознаграждения',
+          'Обучайте менеджеров проведению оценки'
+        ],
+        assessmentGuidelines: [
+          'Используйте поведенческие примеры',
+          'Оценивайте на основе наблюдений',
+          'Обсуждайте результаты с сотрудниками',
+          'Устанавливайте конкретные цели развития'
+        ]
       };
 
-      const competencyName = competencyNames[competencyId];
+      this.setCache(cacheKey, config);
+      return config;
 
-      const prompt = `Создай подробное определение компетенции "${competencyName}" для системы оценки персонала.
-
-Требуемый формат ответа (ТОЛЬКО JSON, без дополнительного текста):
-
-{
-  "id": "${competencyId}",
-  "name": "${competencyName}",
-  "description": "Краткое описание компетенции (1-2 предложения)",
-  "category": "technical|soft|leadership|business",
-  "weight": 1.2,
-  "values": {
-    "1": {
-      "value": 1,
-      "title": "Название уровня 1",
-      "description": "Подробное описание уровня 1 (2-3 предложения)",
-      "examples": ["Пример поведения 1", "Пример поведения 2", "Пример поведения 3"]
-    },
-    "2": {
-      "value": 2,
-      "title": "Название уровня 2",
-      "description": "Подробное описание уровня 2 (2-3 предложения)",
-      "examples": ["Пример поведения 1", "Пример поведения 2", "Пример поведения 3"]
-    },
-    "3": {
-      "value": 3,
-      "title": "Название уровня 3",
-      "description": "Подробное описание уровня 3 (2-3 предложения)",
-      "examples": ["Пример поведения 1", "Пример поведения 2", "Пример поведения 3"]
-    },
-    "4": {
-      "value": 4,
-      "title": "Название уровня 4",
-      "description": "Подробное описание уровня 4 (2-3 предложения)",
-      "examples": ["Пример поведения 1", "Пример поведения 2", "Пример поведения 3"]
-    },
-    "5": {
-      "value": 5,
-      "title": "Название уровня 5",
-      "description": "Подробное описание уровня 5 (2-3 предложения)",
-      "examples": ["Пример поведения 1", "Пример поведения 2", "Пример поведения 3"]
-    }
-  }
-}
-
-Уровни должны быть прогрессивными:
-- Уровень 1: Начальный/базовый
-- Уровень 2: Ниже среднего  
-- Уровень 3: Средний/компетентный
-- Уровень 4: Выше среднего/продвинутый
-- Уровень 5: Экспертный/исключительный
-
-Каждый уровень должен иметь:
-- Четкое название
-- Подробное описание проявлений
-- 3 конкретных примера поведения
-
-Категория должна быть одной из: technical, soft, leadership, business
-Вес должен быть от 1.0 до 1.5`;
-
-      const messages = [
-        { role: 'system', content: prompt }
-      ];
-
-      const response = await this.callOpenAI(messages, 'gpt-4o-mini');
-      const definition: GeneratedCompetencyDefinition = JSON.parse(response);
-
-      return definition;
     } catch (error) {
-      console.error(`Error generating competency definition for ${competencyId}:`, error);
-
-      // Fallback определение
-      return this.getFallbackDefinition(competencyId);
+      console.error('Failed to generate competencies configuration:', error);
+      throw new Error('Не удалось сгенерировать конфигурацию компетенций');
     }
   }
 
-  // Получить все компетенции
-  async getAllCompetencyDefinitions(): Promise<Record<CompetencyId, GeneratedCompetencyDefinition>> {
-    const allDefinitions: Partial<Record<CompetencyId, GeneratedCompetencyDefinition>> = {};
+  // Генерация стандартных компетенций
+  private async generateStandardCompetencies(): Promise<GeneratedCompetencyDefinition[]> {
+    const competencies: GeneratedCompetencyDefinition[] = [];
 
-    // Генерируем все компетенции параллельно
-    const promises = COMPETENCY_IDS.map(async (competencyId) => {
-      const definition = await this.getCompetencyDefinition(competencyId);
-      return { competencyId, definition };
-    });
+    const standardIds: CompetencyId[] = [
+      'communication',
+      'leadership',
+      'productivity',
+      'reliability',
+      'initiative',
+      'technical_expertise',
+      'problem_solving',
+      'teamwork',
+      'adaptability',
+      'emotional_intelligence'
+    ];
 
-    const results = await Promise.all(promises);
+    for (const id of standardIds) {
+      competencies.push(await this.generateCompetencyDefinition(id));
+    }
 
-    results.forEach(({ competencyId, definition }) => {
-      allDefinitions[competencyId] = definition;
-    });
-
-    return allDefinitions as Record<CompetencyId, GeneratedCompetencyDefinition>;
+    return competencies;
   }
 
-  // Очистить кеш
-  clearCache(): void {
-    this.cache.clear();
-    this.isGenerating.clear();
-  }
-
-  // Получить кешированные компетенции
-  getCachedDefinitions(): Record<CompetencyId, GeneratedCompetencyDefinition> {
-    const cached: Partial<Record<CompetencyId, GeneratedCompetencyDefinition>> = {};
-    this.cache.forEach((definition, competencyId) => {
-      cached[competencyId] = definition;
-    });
-    return cached as Record<CompetencyId, GeneratedCompetencyDefinition>;
-  }
-
-  // Fallback определения для случаев, когда API недоступен
-  private getFallbackDefinition(competencyId: CompetencyId): GeneratedCompetencyDefinition {
-    const fallbacks: Record<CompetencyId, GeneratedCompetencyDefinition> = {
-      'communication': {
+  // Генерация определения конкретной компетенции
+  private async generateCompetencyDefinition(competencyId: CompetencyId): Promise<GeneratedCompetencyDefinition> {
+    // Предопределенные определения компетенций
+    const definitions: Record<CompetencyId, GeneratedCompetencyDefinition> = {
+      communication: {
         id: 'communication',
         name: 'Коммуникация',
         description: 'Способность эффективно общаться с коллегами, клиентами и руководством',
@@ -228,9 +219,13 @@ class CompetenciesService {
             description: 'Выдающиеся коммуникативные навыки, вдохновляет и мотивирует других',
             examples: ['Публичный спикер', 'Ментор по коммуникациям', 'Создает культуру открытого общения']
           }
-        }
+        },
+        businessContext: 'Критически важна для всех ролей в современной организации',
+        reasoning: 'Эффективная коммуникация повышает продуктивность и снижает конфликты',
+        developmentSuggestions: ['Курсы публичных выступлений', 'Тренинги по активному слушанию', 'Практика презентаций']
       },
-      'leadership': {
+
+      leadership: {
         id: 'leadership',
         name: 'Лидерство',
         description: 'Способность вести за собой, мотивировать команду и принимать решения',
@@ -267,9 +262,13 @@ class CompetenciesService {
             description: 'Вдохновляющий лидер, создает видение, трансформирует организацию',
             examples: ['Стратегическое видение', 'Вдохновляет на достижения', 'Культурная трансформация']
           }
-        }
+        },
+        businessContext: 'Необходима для руководителей и специалистов с лидерскими функциями',
+        reasoning: 'Хорошее лидерство повышает вовлеченность и продуктивность команды',
+        developmentSuggestions: ['Лидерские тренинги', 'Менторство', 'Изучение кейсов успешного лидерства']
       },
-      'productivity': {
+
+      productivity: {
         id: 'productivity',
         name: 'Продуктивность',
         description: 'Эффективность выполнения задач и достижения результатов',
@@ -306,9 +305,13 @@ class CompetenciesService {
             description: 'Выдающиеся результаты, внедряет инновации, образец для подражания',
             examples: ['Революционные улучшения', 'Наставник по продуктивности', 'Создает новые стандарты']
           }
-        }
+        },
+        businessContext: 'Критически важна для всех ролей, влияет на достижение бизнес-целей',
+        reasoning: 'Высокая продуктивность напрямую влияет на результаты компании',
+        developmentSuggestions: ['Техники тайм-менеджмента', 'Инструменты повышения эффективности', 'Методы оптимизации процессов']
       },
-      'reliability': {
+
+      reliability: {
         id: 'reliability',
         name: 'Надежность',
         description: 'Постоянство в качестве работы и выполнении обязательств',
@@ -345,9 +348,13 @@ class CompetenciesService {
             description: 'Образец надежности, на которого равняются другие',
             examples: ['Безукоризненная репутация', 'Эталон надежности', 'Кризисный управляющий']
           }
-        }
+        },
+        businessContext: 'Важна для всех ролей, особенно критически важных процессов',
+        reasoning: 'Надежность создает доверие и стабильность в работе команды',
+        developmentSuggestions: ['Управление временем', 'Организационные навыки', 'Привычки высокой надежности']
       },
-      'initiative': {
+
+      initiative: {
         id: 'initiative',
         name: 'Инициативность',
         description: 'Способность самостоятельно выявлять проблемы и предлагать решения',
@@ -384,48 +391,99 @@ class CompetenciesService {
             description: 'Трансформационный лидер, создает новые возможности для организации',
             examples: ['Визионер', 'Создает новые направления', 'Вдохновляет на инновации']
           }
-        }
+        },
+        businessContext: 'Важна для инновационных компаний и команд',
+        reasoning: 'Инициативность способствует постоянному улучшению и инновациям',
+        developmentSuggestions: ['Креативное мышление', 'Методы решения проблем', 'Предпринимательские навыки']
       },
-      'problem-solving': {
-        id: 'problem-solving',
-        name: 'Решение проблем',
-        description: 'Способность анализировать проблемы и находить эффективные решения',
+
+      technical_expertise: {
+        id: 'technical_expertise',
+        name: 'Техническая экспертиза',
+        description: 'Глубокие знания и навыки в технической области',
         category: 'technical',
         weight: 1.4,
         values: {
           1: {
             value: 1,
-            title: 'Базовый уровень',
-            description: 'Требует помощи в решении большинства проблем',
-            examples: ['Затрудняется с анализом', 'Нуждается в готовых решениях', 'Избегает сложных задач']
+            title: 'Базовые знания',
+            description: 'Имеет минимальные технические знания, нуждается в постоянной поддержке',
+            examples: ['Базовые операции', 'Нужна помощь в сложных задачах', 'Изучает основы']
           },
           2: {
             value: 2,
-            title: 'Развивающийся уровень',
-            description: 'Может решать простые проблемы с поддержкой',
-            examples: ['Решает стандартные задачи', 'Нужна помощь в сложных случаях', 'Следует шаблонам']
+            title: 'Функциональные знания',
+            description: 'Может выполнять стандартные задачи с минимальной помощью',
+            examples: ['Стандартные процедуры', 'Решение типовых проблем', 'Базовое сопровождение']
           },
           3: {
             value: 3,
-            title: 'Компетентный уровень',
-            description: 'Самостоятельно решает большинство проблем',
-            examples: ['Анализирует ситуации', 'Предлагает решения', 'Применяет системный подход']
+            title: 'Компетентный специалист',
+            description: 'Хорошо разбирается в своей области, может решать сложные задачи',
+            examples: ['Сложные задачи', 'Оптимизация процессов', 'Консультации коллег']
           },
           4: {
             value: 4,
-            title: 'Продвинутый уровень',
-            description: 'Эффективно решает сложные проблемы, оптимизирует решения',
-            examples: ['Разрабатывает инновационные подходы', 'Оптимизирует процессы', 'Предупреждает проблемы']
+            title: 'Эксперт',
+            description: 'Глубокие знания, может решать уникальные проблемы и оптимизировать системы',
+            examples: ['Инновационные решения', 'Архитектурные решения', 'Менторство']
           },
           5: {
             value: 5,
-            title: 'Экспертный уровень',
-            description: 'Мастер решения проблем, создает новые методологии',
-            examples: ['Создает новые подходы', 'Ментор по решению проблем', 'Трансформирует систему']
+            title: 'Ведущий эксперт',
+            description: 'Мировой уровень экспертизы, вносит вклад в развитие отрасли',
+            examples: ['Публикации', 'Конференции', 'Прорывные инновации']
           }
-        }
+        },
+        businessContext: 'Критически важна для технических ролей',
+        reasoning: 'Техническая экспертиза обеспечивает качество и инновации',
+        developmentSuggestions: ['Сертификации', 'Курсы повышения квалификации', 'Исследовательская работа']
       },
-      'teamwork': {
+
+      problem_solving: {
+        id: 'problem_solving',
+        name: 'Решение проблем',
+        description: 'Способность анализировать ситуации и находить эффективные решения',
+        category: 'soft',
+        weight: 1.3,
+        values: {
+          1: {
+            value: 1,
+            title: 'Базовый анализ',
+            description: 'Видит простые проблемы, нуждается в помощи с решениями',
+            examples: ['Замечает очевидные проблемы', 'Нужна помощь в анализе', 'Простые решения']
+          },
+          2: {
+            value: 2,
+            title: 'Систематический подход',
+            description: 'Может анализировать стандартные проблемы и находить решения',
+            examples: ['Структурированный анализ', 'Стандартные решения', 'Документирование проблем']
+          },
+          3: {
+            value: 3,
+            title: 'Комплексный анализ',
+            description: 'Глубоко анализирует сложные ситуации, находит оптимальные решения',
+            examples: ['Многофакторный анализ', 'Креативные решения', 'Предотвращение проблем']
+          },
+          4: {
+            value: 4,
+            title: 'Стратегическое мышление',
+            description: 'Видит системные проблемы, разрабатывает стратегические решения',
+            examples: ['Системный анализ', 'Стратегическое планирование', 'Организационные изменения']
+          },
+          5: {
+            value: 5,
+            title: 'Инновационное мышление',
+            description: 'Создает прорывные решения, меняет парадигмы',
+            examples: ['Прорывные инновации', 'Новые методологии', 'Трансформация процессов']
+          }
+        },
+        businessContext: 'Важна для всех ролей, особенно в условиях изменений',
+        reasoning: 'Способность решать проблемы повышает эффективность и устойчивость',
+        developmentSuggestions: ['Методы анализа', 'Креативные техники', 'Системное мышление']
+      },
+
+      teamwork: {
         id: 'teamwork',
         name: 'Командная работа',
         description: 'Способность эффективно работать в команде и способствовать ее успеху',
@@ -435,218 +493,162 @@ class CompetenciesService {
           1: {
             value: 1,
             title: 'Индивидуалист',
-            description: 'Предпочитает работать самостоятельно, избегает групповой работы',
-            examples: ['Работает в одиночку', 'Не участвует в командных активностях', 'Конфликтует с командой']
+            description: 'Предпочитает работать самостоятельно, испытывает трудности в команде',
+            examples: ['Работает один', 'Избегает групповых задач', 'Конфликты в команде']
           },
           2: {
             value: 2,
-            title: 'Наблюдатель',
-            description: 'Участвует в командной работе, но не проявляет инициативы',
-            examples: ['Выполняет свою часть работы', 'Не предлагает идеи', 'Пассивен в обсуждениях']
+            title: 'Участник команды',
+            description: 'Участвует в командной работе, но не берет инициативу',
+            examples: ['Выполняет свою часть', 'Участвует в обсуждениях', 'Поддерживает коллег']
           },
           3: {
             value: 3,
-            title: 'Участник',
-            description: 'Активно участвует в командной работе, выполняет свою роль',
-            examples: ['Вносит вклад в общую работу', 'Поддерживает коллег', 'Участвует в обсуждениях']
+            title: 'Активный участник',
+            description: 'Активно участвует в команде, способствует достижению целей',
+            examples: ['Вносит идеи', 'Помогает коллегам', 'Координирует работу']
           },
           4: {
             value: 4,
-            title: 'Лидер команды',
-            description: 'Берет инициативу в командной работе, мотивирует других',
-            examples: ['Организует командную работу', 'Мотивирует коллег', 'Разрешает конфликты']
+            title: 'Командный лидер',
+            description: 'Берет ответственность за командные результаты, мотивирует других',
+            examples: ['Лидерство в проектах', 'Мотивация команды', 'Разрешение конфликтов']
           },
           5: {
             value: 5,
-            title: 'Командный вдохновитель',
-            description: 'Создает сильную командную культуру, вдохновляет на достижения',
-            examples: ['Создает атмосферу доверия', 'Вдохновляет на высокие результаты', 'Развивает командный дух']
+            title: 'Командный архитектор',
+            description: 'Создает высокоэффективные команды, развивает командную культуру',
+            examples: ['Строительство команд', 'Культурные изменения', 'Командное развитие']
           }
-        }
+        },
+        businessContext: 'Критически важна для всех организаций',
+        reasoning: 'Командная работа повышает эффективность и инновационность',
+        developmentSuggestions: ['Командные тренинги', 'Развитие эмоционального интеллекта', 'Лидерские навыки']
       },
-      'adaptability': {
+
+      adaptability: {
         id: 'adaptability',
         name: 'Адаптивность',
-        description: 'Способность быстро адаптироваться к изменениям и новым условиям',
+        description: 'Способность эффективно адаптироваться к изменениям и новым условиям',
         category: 'soft',
         weight: 1.2,
         values: {
           1: {
             value: 1,
             title: 'Сопротивление изменениям',
-            description: 'С трудом адаптируется к изменениям, предпочитает стабильность',
-            examples: ['Сопротивляется новым процессам', 'Трудно перестраивается', 'Предпочитает привычное']
+            description: 'Испытывает трудности с изменениями, предпочитает стабильность',
+            examples: ['Сопротивление новому', 'Стресс от изменений', 'Задержки в адаптации']
           },
           2: {
             value: 2,
-            title: 'Ограниченная адаптивность',
-            description: 'Может адаптироваться к небольшим изменениям с трудом',
-            examples: ['Нужна помощь в адаптации', 'Долго привыкает к новому', 'Сопротивляется изменениям']
+            title: 'Минимальная адаптация',
+            description: 'Адаптируется к простым изменениям со временем',
+            examples: ['Привыкает к новому', 'Нужна поддержка', 'Базовая гибкость']
           },
           3: {
             value: 3,
-            title: 'Гибкий',
-            description: 'Хорошо адаптируется к изменениям в рабочей среде',
-            examples: ['Быстро привыкает к новым задачам', 'Адаптирует подходы', 'Поддерживает изменения']
+            title: 'Хорошая адаптивность',
+            description: 'Быстро адаптируется к изменениям, поддерживает эффективность',
+            examples: ['Быстрая адаптация', 'Поддержка изменений', 'Гибкость в работе']
           },
           4: {
             value: 4,
             title: 'Высокая адаптивность',
-            description: 'Легко адаптируется к любым изменениям, помогает другим',
-            examples: ['Предвосхищает изменения', 'Помогает коллегам адаптироваться', 'Видит возможности в изменениях']
+            description: 'Активно участвует в изменениях, помогает другим адаптироваться',
+            examples: ['Драйвер изменений', 'Помощь коллегам', 'Инновационные подходы']
           },
           5: {
             value: 5,
-            title: 'Мастер адаптации',
-            description: 'Создает культуру адаптивности, ведет через трансформации',
-            examples: ['Внедряет изменения', 'Создает гибкую культуру', 'Вдохновляет на адаптацию']
+            title: 'Трансформационный лидер',
+            description: 'Создает культуру адаптивности, ведет через радикальные изменения',
+            examples: ['Культурные трансформации', 'Управление изменениями', 'Визионерское лидерство']
           }
-        }
+        },
+        businessContext: 'Критически важна в быстро меняющейся бизнес-среде',
+        reasoning: 'Адаптивность обеспечивает устойчивость и конкурентоспособность',
+        developmentSuggestions: ['Управление изменениями', 'Гибкое мышление', 'Стресс-менеджмент']
       },
-      'innovation': {
-        id: 'innovation',
-        name: 'Инновационность',
-        description: 'Способность генерировать новые идеи и внедрять инновации',
-        category: 'business',
-        weight: 1.3,
+
+      emotional_intelligence: {
+        id: 'emotional_intelligence',
+        name: 'Эмоциональный интеллект',
+        description: 'Способность понимать и управлять эмоциями своими и окружающих',
+        category: 'soft',
+        weight: 1.1,
         values: {
           1: {
             value: 1,
-            title: 'Консервативный',
-            description: 'Предпочитает проверенные методы, избегает рисков',
-            examples: ['Следует устоявшимся практикам', 'Не предлагает новые идеи', 'Избегает экспериментов']
+            title: 'Низкий ЭИ',
+            description: 'Испытывает трудности с пониманием эмоций, часто вызывает конфликты',
+            examples: ['Не понимает чувства других', 'Импульсивные реакции', 'Конфликты в общении']
           },
           2: {
             value: 2,
-            title: 'Ограниченная инновационность',
-            description: 'Иногда предлагает идеи, но редко внедряет их',
-            examples: ['Идеи остаются на уровне предложений', 'Нужна мотивация для инноваций', 'Осторожен в экспериментах']
+            title: 'Базовый ЭИ',
+            description: 'Базовое понимание эмоций, иногда принимает неоптимальные решения',
+            examples: ['Понимает базовые эмоции', 'Умеет слушать', 'Нуждается в развитии']
           },
           3: {
             value: 3,
-            title: 'Инновационный',
-            description: 'Регулярно предлагает и внедряет улучшения',
-            examples: ['Предлагает улучшения процессов', 'Внедряет новые подходы', 'Поддерживает инновационную культуру']
+            title: 'Развитый ЭИ',
+            description: 'Хорошо понимает эмоции, эффективно управляет отношениями',
+            examples: ['Эмпатичное общение', 'Управление эмоциями', 'Конструктивные решения']
           },
           4: {
             value: 4,
-            title: 'Высокая инновационность',
-            description: 'Создает инновационные решения, ведет проекты изменений',
-            examples: ['Разрабатывает новые продукты/услуги', 'Внедряет прорывные идеи', 'Вдохновляет на инновации']
+            title: 'Высокий ЭИ',
+            description: 'Отлично понимает эмоциональную динамику, вдохновляет и мотивирует',
+            examples: ['Вдохновляющее лидерство', 'Эмоциональная поддержка', 'Развитие других']
           },
           5: {
             value: 5,
-            title: 'Инновационный лидер',
-            description: 'Создает культуру инноваций, трансформирует организацию',
-            examples: ['Создает инновационную стратегию', 'Внедряет культурные изменения', 'Визионер в своей области']
+            title: 'Мастер ЭИ',
+            description: 'Создает эмоционально здоровую среду, трансформирует культуру',
+            examples: ['Эмоциональная трансформация', 'Культурное лидерство', 'Менторство по ЭИ']
           }
-        }
-      },
-      'customer-focus': {
-        id: 'customer-focus',
-        name: 'Ориентация на клиента',
-        description: 'Способность понимать и удовлетворять потребности клиентов',
-        category: 'business',
-        weight: 1.4,
-        values: {
-          1: {
-            value: 1,
-            title: 'Низкая ориентация',
-            description: 'Фокусируется на внутренних процессах, игнорирует клиентов',
-            examples: ['Не учитывает потребности клиентов', 'Фокус на внутренних задачах', 'Игнорирует обратную связь']
-          },
-          2: {
-            value: 2,
-            title: 'Базовая ориентация',
-            description: 'Выполняет требования клиентов, но не предвосхищает потребности',
-            examples: ['Реагирует на запросы', 'Выполняет минимальные требования', 'Не инициирует улучшения']
-          },
-          3: {
-            value: 3,
-            title: 'Клиент-ориентированный',
-            description: 'Активно работает над удовлетворением потребностей клиентов',
-            examples: ['Предвосхищает потребности', 'Собирает обратную связь', 'Предлагает улучшения']
-          },
-          4: {
-            value: 4,
-            title: 'Высокая ориентация',
-            description: 'Создает исключительный клиентский опыт, влияет на лояльность',
-            examples: ['Создает wow-эффект', 'Персонализированный подход', 'Влияет на retention клиентов']
-          },
-          5: {
-            value: 5,
-            title: 'Клиентский чемпион',
-            description: 'Создает культуру клиент-центричности, трансформирует подход к клиентам',
-            examples: ['Создает клиентскую стратегию', 'Внедряет культурные изменения', 'Эталон клиентского сервиса']
-          }
-        }
+        },
+        businessContext: 'Критически важен для лидеров и работы с людьми',
+        reasoning: 'Эмоциональный интеллект повышает эффективность команд и удовлетворенность',
+        developmentSuggestions: ['Тренинги по эмоциональному интеллекту', 'Коучинг', 'Самоанализ']
       }
     };
 
-    return fallbacks[competencyId] || {
-      id: competencyId,
-      name: competencyId,
-      description: `Компетенция ${competencyId}`,
-      category: 'soft',
-      weight: 1.0,
-      values: {
-        1: {
-          value: 1,
-          title: 'Начальный уровень',
-          description: 'Требует развития',
-          examples: ['Нуждается в поддержке', 'Учится основам', 'Требует guidance']
-        },
-        2: {
-          value: 2,
-          title: 'Базовый уровень',
-          description: 'Базовые знания и навыки',
-          examples: ['Выполняет стандартные задачи', 'Нуждается в контроле', 'Развивается']
-        },
-        3: {
-          value: 3,
-          title: 'Средний уровень',
-          description: 'Уверенное выполнение задач',
-          examples: ['Самостоятельная работа', 'Хорошее качество', 'Активное развитие']
-        },
-        4: {
-          value: 4,
-          title: 'Продвинутый уровень',
-          description: 'Высокие результаты и развитие других',
-          examples: ['Внедряет улучшения', 'Менторство', 'Высокая эффективность']
-        },
-        5: {
-          value: 5,
-          title: 'Экспертный уровень',
-          description: 'Лидер в своей области',
-          examples: ['Инновации', 'Стратегическое мышление', 'Влияние на организацию']
-        }
-      }
-    };
+    return definitions[competencyId] || definitions.communication;
   }
 
-  // Вызов OpenAI API
-  private async callOpenAI(messages: any[], model: string = 'gpt-4o-mini'): Promise<string> {
-    const response = await fetch(API_CONFIG.openaiURL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: 2000,
-        temperature: 0.7,
-      }),
-    });
+  // Предзагрузка данных
+  async preloadData(context: CompanyContext): Promise<void> {
+    this.setCompanyContext(context);
 
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.statusText}`);
+    // Предзагружаем основные компетенции
+    await this.getAllCompetencyDefinitions();
+  }
+
+  // Проверка здоровья сервиса
+  async getHealth(): Promise<{ status: 'healthy' | 'degraded' | 'unhealthy'; lastCheck: number; details?: any }> {
+    try {
+      // Проверяем кеш
+      const cacheStats = this.getCacheStats();
+
+      return {
+        status: 'healthy',
+        lastCheck: Date.now(),
+        details: {
+          cacheSize: cacheStats.size,
+          cacheKeys: cacheStats.keys
+        }
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        lastCheck: Date.now(),
+        details: { error: error.message }
+      };
     }
-
-    const data = await response.json();
-    return data.choices[0]?.message?.content || 'Ошибка получения ответа';
   }
 }
 
-export default CompetenciesService;
+// Создаем и экспортируем экземпляр сервиса
+const competenciesService = new CompetenciesService();
 
+export default competenciesService;

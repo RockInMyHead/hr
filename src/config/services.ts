@@ -168,3 +168,4 @@ export function validateConfig(): { valid: boolean; errors: string[] } {
 
 // Экспорт конфигурации для использования в сервисах
 export default globalConfig;
+
