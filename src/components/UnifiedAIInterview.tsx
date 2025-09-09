@@ -478,49 +478,6 @@ export function UnifiedAIInterview({ user, onBack, onComplete }: UnifiedAIInterv
               </Card>
             )}
 
-            {/* Прогресс модулей */}
-            {session && (
-              <Card className="bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-white">
-                    <BarChart3 className="h-5 w-5" />
-                    Модули
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {session.modules.map((module) => (
-                      <div key={module.type} className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {getModuleIcon(module.type)}
-                            <span className="text-sm font-medium truncate text-white">
-                              {module.name}
-                            </span>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className={`text-xs ${getModuleStatusColor(module.status)} text-white border-0`}
-                          >
-                            {module.status === 'pending' && 'Ожидает'}
-                            {module.status === 'in-progress' && 'В работе'}
-                            {module.status === 'completed' && 'Завершен'}
-                          </Badge>
-                        </div>
-
-                        <div className="space-y-1">
-                          <Progress value={module.progress} className="h-2" />
-                          <div className="flex justify-between text-xs text-gray-400">
-                            <span>{module.questionsAsked}/{module.targetQuestions} вопросов</span>
-                            <span>{Math.round(module.progress)}%</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           {/* Основная область чата */}

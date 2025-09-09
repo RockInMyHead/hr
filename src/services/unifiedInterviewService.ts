@@ -644,33 +644,7 @@ class UnifiedInterviewService extends BaseService implements AIService {
 
   // Генерация приветственного сообщения
   private async generateWelcomeMessage(): Promise<string> {
-    const session = this.activeSession!;
-    
-    const prompt = `Сгенерируй приветственное сообщение для начала HR интервью.
-
-КОНТЕКСТ:
-- Пользователь: ${session.userId}
-- Уровень сложности: ${session.settings.difficulty}
-- Стиль интервью: ${session.settings.style}
-- Продолжительность: ${session.settings.duration} минут
-
-ЗАДАЧА:
-Создай дружелюбное приветствие, которое:
-- Поприветствует кандидата по имени
-- Объяснит формат интервью
-- Создаст позитивную атмосферу
-- Задаст первый простой вопрос для знакомства
-
-СТИЛЬ:
-- Профессиональный, но дружелюбный
-- Располагающий к открытой беседе
-- Не формальный, используй "ты"
-
-Верни только текст приветствия.`;
-
-    const messages = [{ role: 'system', content: prompt }];
-    const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
-    return response;
+    return "Привет";
   }
 
   // Генерация дружеских ответов для первых сообщений
