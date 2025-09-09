@@ -612,11 +612,13 @@ ${this.currentProfile.evaluations.map(evaluation =>
 
     if (!lastUserMessage || !lastAssistantMessage) return;
 
-    // Находим релевантный вопрос из базы знаний
+    console.log('RAG: Evaluating user response:', lastUserMessage.content);
+
+    // Сначала пробуем найти релевантный вопрос из базы знаний
     const relevantQuestion = this.findRelevantQuestions(lastUserMessage.content)[0];
 
     if (relevantQuestion) {
-      // Синхронно оцениваем ответ
+      console.log('RAG: Found relevant question from knowledge base:', relevantQuestion.category);
       try {
         await this.evaluateResponse(
           relevantQuestion.question,
@@ -627,6 +629,87 @@ ${this.currentProfile.evaluations.map(evaluation =>
       } catch (error) {
         console.error('Auto evaluation error:', error);
       }
+    } else {
+      // Если нет релевантного вопроса, делаем общую оценку компетенций
+      console.log('RAG: No relevant question found, performing general competency analysis');
+      try {
+        await this.analyzeResponseForCompetencies(lastUserMessage.content, lastAssistantMessage.content);
+      } catch (error) {
+        console.error('General competency analysis error:', error);
+      }
+    }
+  }
+
+  // Анализ ответа на компетенции без конкретного вопроса
+  private async analyzeResponseForCompetencies(userResponse: string, questionContext: string): Promise<void> {
+    const analysisPrompt = `Проанализируй ответ кандидата и определи проявленные компетенции.
+
+ВОПРОС/КОНТЕКСТ: ${questionContext}
+ОТВЕТ КАНДИДАТА: ${userResponse}
+
+Задача: Определи какие навыки и компетенции проявил кандидат в своем ответе.
+
+Возможные категории компетенций:
+- Техническое мышление
+- Ответственность
+- Самостоятельность
+- Коммуникация
+- Решение проблем
+- Лидерство
+- Аналитическое мышление
+- Обучаемость
+- Стрессоустойчивость
+- Инициативность
+
+Верни результат в JSON формате:
+{
+  "detectedCompetencies": [
+    {
+      "name": "название компетенции",
+      "score": число от 0 до 100,
+      "category": "technical" или "soft",
+      "evidence": "цитата из ответа, подтверждающая компетенцию",
+      "reasoning": "объяснение оценки"
+    }
+  ],
+  "overallAssessment": {
+    "score": число от 0 до 100,
+    "strengths": ["список сильных сторон"],
+    "areasForDevelopment": ["области для развития"]
+  }
+}`;
+
+    try {
+      const response = await this.callOpenAI([
+        { role: 'system', content: analysisPrompt }
+      ], 'gpt-4o-mini');
+
+      const analysis = JSON.parse(response);
+      console.log('RAG: Competency analysis result:', analysis);
+
+      // Обрабатываем каждую обнаруженную компетенцию
+      if (analysis.detectedCompetencies && Array.isArray(analysis.detectedCompetencies)) {
+        for (const competency of analysis.detectedCompetencies) {
+          const evaluation: EvaluationResult = {
+            score: competency.score,
+            strengths: [competency.evidence],
+            weaknesses: [],
+            recommendations: [`Развивайте ${competency.name.toLowerCase()}`],
+            category: competency.name,
+            difficulty: 'средний'
+          };
+
+          // Добавляем оценку в профиль
+          this.currentProfile.evaluations.push(evaluation);
+        }
+
+        // Обновляем профиль
+        this.updateCandidateProfile();
+        console.log('RAG: Profile updated with competencies:', Object.keys(this.currentProfile.technicalSkills), Object.keys(this.currentProfile.softSkills));
+      }
+
+    } catch (error) {
+      console.error('Competency analysis error:', error);
     }
   }
 }

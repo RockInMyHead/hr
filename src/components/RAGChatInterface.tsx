@@ -246,6 +246,7 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
       setMessages(prev => [...prev, assistantMessage]);
       
       // Автоматическая оценка ответа
+      console.log('RAG: Starting automatic evaluation of user response...');
       await ragService.autoEvaluateLastResponse();
 
       // Небольшая задержка для завершения оценки
@@ -253,6 +254,13 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
 
       // Обновляем профиль
       const updatedProfile = ragService.getCurrentProfile();
+      console.log('RAG: Updated profile after evaluation:', {
+        overallScore: updatedProfile?.overallScore,
+        technicalSkillsCount: updatedProfile?.technicalSkills ? Object.keys(updatedProfile.technicalSkills).length : 0,
+        softSkillsCount: updatedProfile?.softSkills ? Object.keys(updatedProfile.softSkills).length : 0,
+        evaluationsCount: updatedProfile?.evaluations?.length || 0
+      });
+
       if (updatedProfile) {
         // Сохраняем профиль в базу данных
         const savedProfile = await chatService.saveCandidateProfile(currentSessionId, {
@@ -266,10 +274,13 @@ export function RAGChatInterface({ user, onBack }: RAGChatInterfaceProps) {
           aiAnalysis: JSON.stringify(updatedProfile.aiAnalysis || {}),
           individualDevelopmentPlan: JSON.stringify(updatedProfile.individualDevelopmentPlan || {})
         });
+        console.log('RAG: Profile saved to database:', savedProfile);
         setCurrentProfile(savedProfile);
 
         // Сохраняем компетенции
         await saveCompetenciesToDatabase(updatedProfile);
+      } else {
+        console.log('RAG: No updated profile received from ragService');
       }
 
     } catch (error) {
@@ -729,6 +740,23 @@ ${finalProfile.recommendations.slice(0, 3).map(rec => `• ${rec}`).join('\n')}`
                         <span className="font-medium">{currentProfile.overallScore}/100</span>
                       </div>
                       <Progress value={currentProfile.overallScore} className="h-2" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>Оценок компетенций</span>
+                        <span className="font-medium">
+                          {(() => {
+                            try {
+                              const techSkills = JSON.parse(currentProfile.technicalSkills || '{}');
+                              const softSkills = JSON.parse(currentProfile.softSkills || '{}');
+                              return Object.keys(techSkills).length + Object.keys(softSkills).length;
+                            } catch {
+                              return 0;
+                            }
+                          })()}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
