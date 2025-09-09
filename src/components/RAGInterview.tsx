@@ -67,10 +67,7 @@ export const RAGInterview: React.FC<RAGInterviewProps> = ({
     setIsLoading(true);
 
     // Приветственное сообщение от ассистента
-    const welcomeMessage = await ragService.conductInterview(
-      `Привет! Меня зовут ${candidateName}, готов к собеседованию на позицию ${difficulty} разработчика.`,
-      difficulty
-    );
+    const welcomeMessage = 'Привет!';
 
     const newMessages: ChatMessage[] = [
       {
