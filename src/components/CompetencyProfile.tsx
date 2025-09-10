@@ -353,6 +353,7 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
                 </Card>
               ))}
             </div>
+              </>
             )}
           </TabsContent>
 
