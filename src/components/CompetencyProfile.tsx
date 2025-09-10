@@ -255,6 +255,28 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
 
           {/* Обзор компетенций */}
           <TabsContent value="overview" className="space-y-6">
+            {userCompetencies.length === 0 ? (
+              <Card className="bg-white/5 border-white/10 text-white">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Info className="h-5 w-5" />
+                    Компетенции не оценены
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-gray-300 mb-4">
+                    У вас еще нет оценок компетенций. Чтобы получить профиль компетенций, пройдите одно из следующих оцениваний:
+                  </p>
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-400">• AI собеседование с RAG</p>
+                    <p className="text-sm text-gray-400">• Полное AI собеседование</p>
+                    <p className="text-sm text-gray-400">• Оценка 360°</p>
+                    <p className="text-sm text-gray-400">• AI оценка по чек-листу</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
             {/* Общая статистика */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card className="bg-white/5 border-white/10 text-white">
@@ -331,7 +353,6 @@ export function CompetencyProfile({ user, onBack }: CompetencyProfileProps) {
                 </Card>
               ))}
             </div>
-              </>
             )}
           </TabsContent>
 

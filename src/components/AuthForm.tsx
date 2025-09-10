@@ -255,6 +255,7 @@ export function AuthForm({ onAuthSuccess }: AuthFormProps) {
                       <option value="manager">Менеджер</option>
                       <option value="director">Директор</option>
                       <option value="managing_director">Управляющий директор</option>
+                      <option value="administrator">Администратор</option>
                     </select>
                   </div>
                 </div>

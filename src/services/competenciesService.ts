@@ -652,3 +652,7 @@ class CompetenciesService extends BaseService implements AIService {
 const competenciesService = new CompetenciesService();
 
 export default competenciesService;
+
+
+
+
